@@ -82,3 +82,8 @@
 		};
 	};
 };
+
+&gdsc_mdss {
+	qcom,retain-periph;
+	qcom,retain-mem;
+};
