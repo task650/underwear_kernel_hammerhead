@@ -46,14 +46,12 @@ static struct cpu_stats
     unsigned int counter[2];
 	unsigned long timestamp[2];
 	struct notifier_block notif;
-	bool gpu_busy_quad_mode;
 	bool first_boot;
 } stats = {
 	.default_first_level = DEFAULT_FIRST_LEVEL,
     .suspend_frequency = DEFAULT_SUSPEND_FREQ,
     .cores_on_touch = DEFAULT_CORES_ON_TOUCH,
     .counter = {0},
-	.gpu_busy_quad_mode = false,
 	.first_boot = true,
 };
 
@@ -96,27 +94,6 @@ static inline int get_cpu_load(unsigned int cpu)
 	return (cur_load * policy.cur) / policy.max;
 }
 
-/* 
- * this is just here as a reminder, currently not sure I want to keep this
- * feature 
- */
-#if 0
-	if (stats.gpu_busy_quad_mode && 
-			unlikely(gpu_pref_counter >= GPU_BUSY_THRESHOLD))
-	{
-		if (num_online_cpus() < num_possible_cpus())
-		{
-			for_each_possible_cpu(cpu)
-			{
-				if (cpu && cpu_is_offline(cpu))
-					cpu_up(cpu);
-			}
-		}
-
-		return;
-	}
-#endif
-
 static void cpu_revive(unsigned int cpu)
 {
 	cpu_up(cpu);
@@ -144,22 +121,6 @@ static void __ref decide_hotplug_func(struct work_struct *work)
 	unsigned int cur_load;
 	unsigned int freq_buf;
 	struct cpufreq_policy policy;
-	//int i;
-
-	//commented for now
-	/*	
-	if (_ts->ts_data.curr_data[0].state == ABS_PRESS)
-	{
-		for (i = num_online_cpus(); i < stats.cores_on_touch; i++)
-		{
-			if (cpu_is_offline(i))
-			{
-				cpu_up(i);
-				stats.timestamp[i-2] = ktime_to_ms(ktime_get());
-			}
-		}
-		goto re_queue;
-	}*/
 
     for_each_online_cpu(cpu) 
     {
@@ -206,7 +167,6 @@ static void __ref decide_hotplug_func(struct work_struct *work)
 			break;
 	}
 
-//reschedule:	
     queue_delayed_work(wq, &decide_hotplug, msecs_to_jiffies(TIMER));
 }
 
