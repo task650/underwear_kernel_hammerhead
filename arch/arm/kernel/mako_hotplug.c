@@ -13,46 +13,40 @@
  * Simple no bullshit hot[un]plug driver for SMP
  */
 
+#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/cpu.h>
 #include <linux/workqueue.h>
 #include <linux/sched.h>
+#include <linux/platform_device.h>
 #include <linux/timer.h>
 #include <linux/cpufreq.h>
 #include <linux/delay.h>
 #include <linux/hotplug.h>
 #include <linux/input.h>
-#include <linux/lcd_notify.h>
 #include <linux/jiffies.h>
 
-#include <mach/cpufreq.h>
+#include <linux/lcd_notify.h>
+
+
+#define MAKO_HOTPLUG "mako_hotplug"
 
 #define DEFAULT_FIRST_LEVEL 60
-#define DEFAULT_SUSPEND_FREQ 1190400
-#define DEFAULT_CORES_ON_TOUCH 2
 #define HIGH_LOAD_COUNTER 20
-#define TIMER HZ
-#define GPU_BUSY_THRESHOLD 60
-#define CPUFREQ_UNPLUG_LIMIT 960000
-
+#define CPUFREQ_UNPLUG_LIMIT 1000000
 #define MIN_TIME_CPU_ONLINE HZ
+#define TIMER HZ
 
 static struct cpu_stats
 {
     unsigned int default_first_level;
-    unsigned int suspend_frequency;
-    unsigned int cores_on_touch;
     unsigned int counter[2];
 	unsigned long timestamp[2];
 	struct notifier_block notif;
-	bool first_boot;
 } stats = {
 	.default_first_level = DEFAULT_FIRST_LEVEL,
-    .suspend_frequency = DEFAULT_SUSPEND_FREQ,
-    .cores_on_touch = DEFAULT_CORES_ON_TOUCH,
     .counter = {0},
-	.first_boot = true,
 };
 
 struct cpu_load_data {
@@ -63,7 +57,6 @@ struct cpu_load_data {
 static DEFINE_PER_CPU(struct cpu_load_data, cpuload);
 
 static struct workqueue_struct *wq;
-static struct workqueue_struct *screen_on_off_wq;
 static struct delayed_work decide_hotplug;
 static struct work_struct suspend;
 static struct work_struct resume;
@@ -122,6 +115,9 @@ static void __ref decide_hotplug_func(struct work_struct *work)
 	unsigned int freq_buf;
 	struct cpufreq_policy policy;
 
+	if (unlikely(num_online_cpus() == 1))
+		goto reschedule;
+
     for_each_online_cpu(cpu) 
     {
 		cur_load = get_cpu_load(cpu);
@@ -167,69 +163,50 @@ static void __ref decide_hotplug_func(struct work_struct *work)
 			break;
 	}
 
-    queue_delayed_work(wq, &decide_hotplug, msecs_to_jiffies(TIMER));
+reschedule:
+    queue_delayed_work_on(0, wq, &decide_hotplug, msecs_to_jiffies(TIMER));
 }
 
-static void hotplug_suspend(struct work_struct *work)
-{	 
-    int cpu;
+static void mako_hotplug_suspend(struct work_struct *work)
+{
+	int cpu;
 
-    /* First flush the WQ then cancel the hotplug work when the screen is off */
-	flush_workqueue(wq);
-    cancel_delayed_work(&decide_hotplug);
+	pr_info("%s: suspend\n", MAKO_HOTPLUG);
 
-    pr_info("Suspend stopping Hotplug work...\n");
-
-	/* reset the counters so that we start clean next time the display is on */
 	stats.counter[0] = 0;
 	stats.counter[1] = 0;
 
-	for_each_possible_cpu(cpu)
+	for_each_online_cpu(cpu)
 	{
-		if (cpu_online(cpu) && cpu)
-			cpu_down(cpu);
+		if (!cpu)
+			continue;
+
+		cpu_down(cpu);
 	}
 }
 
-static void __ref hotplug_resume(struct work_struct *work)
-{  
-    int cpu;
-
-	for_each_possible_cpu(cpu)
-	{
-		if (cpu_is_offline(cpu) && cpu)
-			cpu_up(cpu);
-	}
-    
-    pr_info("Resume starting Hotplug work...\n");
-    queue_delayed_work(wq, &decide_hotplug, HZ * 2);
-}
-
-static int __ref lcd_notifier_callback(struct notifier_block *this,
-				unsigned long event, void *data)
+static void __ref mako_hotplug_resume(struct work_struct *work)
 {
-	switch (event) {
-	case LCD_EVENT_ON_START:
-		if (stats.first_boot)
-			break;
+	int cpu;
 
-		pr_info("LCD is on.\n");
-		queue_work_on(0, screen_on_off_wq, &resume);
-		break;
-	case LCD_EVENT_ON_END:
-		break;
-	case LCD_EVENT_OFF_START:
-		pr_info("LCD is off.\n");
-		queue_work_on(0, screen_on_off_wq, &suspend);
-		stats.first_boot = false;
-		break;
-	case LCD_EVENT_OFF_END:
-		break;
-	default:
-		break;
+	for_each_possible_cpu(cpu)
+	{
+		if (!cpu)
+			continue;
+
+		cpu_up(cpu);
 	}
+}
 
-	return 0;
+static int lcd_notifier_callback(struct notifier_block *this,
+									unsigned long event, void *data)
+{
+	if (event == LCD_EVENT_ON_START)
+		schedule_work(&resume);	
+	else if (event == LCD_EVENT_OFF_START)
+		schedule_work(&suspend);
+
+	return NOTIFY_OK;
 }
 
 /* sysfs functions for external driver */
@@ -238,71 +215,95 @@ void update_first_level(unsigned int level)
     stats.default_first_level = level;
 }
 
-void update_suspend_frequency(unsigned int freq)
-{
-    stats.suspend_frequency = freq;
-}
-
-void update_cores_on_touch(unsigned int num)
-{
-    stats.cores_on_touch = num;
-}
-
-void update_gpu_busy_quad_mode(unsigned int num)
-{
-	stats.gpu_busy_quad_mode = num;
-}
-
 unsigned int get_first_level()
 {
     return stats.default_first_level;
 }
-
-unsigned int get_suspend_frequency()
-{
-    return stats.suspend_frequency;
-}
-
-unsigned int get_cores_on_touch()
-{
-    return stats.cores_on_touch;
-}
-
-unsigned int get_gpu_busy_quad_mode()
-{
-	return stats.gpu_busy_quad_mode;
-}
-
 /* end sysfs functions from external driver */
 
-int __init mako_hotplug_init(void)
+static int __devinit mako_hotplug_probe(struct platform_device *pdev)
 {
-	pr_info("Mako Hotplug driver started.\n");
+	int ret = 0;
 
-    wq = alloc_ordered_workqueue("mako_hotplug_workqueue", 0);
+    wq = alloc_workqueue("mako_hotplug_workqueue", WQ_HIGHPRI | WQ_FREEZABLE, 0);
     
     if (!wq)
-        return -ENOMEM;
+	{
+		ret = -ENOMEM;
+		goto err;
+	}
 
-	screen_on_off_wq = alloc_workqueue("screen_on_off_workqueue", WQ_HIGHPRI, 0);
-    
-    if (!screen_on_off_wq)
-        return -ENOMEM;
+	stats.timestamp[0] = jiffies;
+	stats.timestamp[1] = jiffies;
 
 	stats.notif.notifier_call = lcd_notifier_callback;
 	if (lcd_register_client(&stats.notif))
-		return -EINVAL;
+	{
+		ret = -EINVAL;
+		goto err;
+	}
 
-	stats.timestamp[0] = jiffies;
-	stats.timestamp[1] = jiffies;    
-
-	INIT_WORK(&suspend, hotplug_suspend);
-	INIT_WORK(&resume, hotplug_resume);
+	INIT_WORK(&suspend, mako_hotplug_suspend);
+	INIT_WORK(&resume, mako_hotplug_resume);
     INIT_DELAYED_WORK(&decide_hotplug, decide_hotplug_func);
 
-	queue_delayed_work(wq, &decide_hotplug, HZ * 20);
+	queue_delayed_work_on(0, wq, &decide_hotplug, HZ * 20);
     
-    return 0;
-}
-late_initcall(mako_hotplug_init);
+    return ret;
 
+err:
+	return ret;	
+}
+
+static struct platform_device mako_hotplug_device = {
+	.name = MAKO_HOTPLUG,
+	.id = -1,
+};
+
+static int mako_hotplug_remove(struct platform_device *pdev)
+{
+	destroy_workqueue(wq);
+
+	return 0;
+}
+
+static struct platform_driver mako_hotplug_driver = {
+	.probe = mako_hotplug_probe,
+	.remove = mako_hotplug_remove,
+	.driver = {
+		.name = MAKO_HOTPLUG,
+		.owner = THIS_MODULE,
+	},
+};
+
+static int __init mako_hotplug_init(void)
+{
+	int ret;
+
+	ret = platform_driver_register(&mako_hotplug_driver);
+
+	if (ret)
+	{
+		return ret;
+	}
+
+	ret = platform_device_register(&mako_hotplug_device);
+
+	if (ret)
+	{
+		return ret;
+	}
+
+	pr_info("%s: init\n", MAKO_HOTPLUG);
+
+	return ret;
+}
+
+static void __exit mako_hotplug_exit(void)
+{
+	platform_device_unregister(&mako_hotplug_device);
+	platform_driver_unregister(&mako_hotplug_driver);
+}
+
+late_initcall(mako_hotplug_init);
+module_exit(mako_hotplug_exit);
