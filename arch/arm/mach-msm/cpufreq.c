@@ -50,8 +50,7 @@ struct cpufreq_suspend_t {
 
 static DEFINE_PER_CPU(struct cpufreq_suspend_t, cpufreq_suspend);
 
-static int set_cpu_freq(struct cpufreq_policy *policy, unsigned int new_freq,
-			unsigned int index)
+static int set_cpu_freq(struct cpufreq_policy *policy, unsigned int new_freq)
 {
 	int ret = 0;
 	int saved_sched_policy = -EINVAL;
