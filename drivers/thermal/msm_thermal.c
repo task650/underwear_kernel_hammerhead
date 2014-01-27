@@ -59,7 +59,9 @@ static struct task_struct *freq_mitigation_task;
 static struct completion hotplug_notify_complete;
 static struct completion freq_mitigation_complete;
 
-static int enabled;
+static int enabled = 1;
+static bool is_throttling = false;
+static unsigned int user_max_freq = 2265600;
 static int rails_cnt;
 static int psm_rails_cnt;
 static int ocr_rail_cnt;
@@ -219,6 +221,10 @@ static int  msm_thermal_cpufreq_callback(struct notifier_block *nfb,
 		if (max_freq_req < min_freq_req)
 			pr_err("Invalid frequency request Max:%u Min:%u\n",
 				max_freq_req, min_freq_req);
+
+		if (max_freq_req == UINT_MAX)
+			is_throttling = false;
+
 		break;
 	}
 	return NOTIFY_OK;
@@ -744,11 +750,11 @@ static int msm_thermal_get_freq_table(void)
 		goto fail;
 	}
 
-	while (table[i].frequency != CPUFREQ_TABLE_END)
+	while (table[i].frequency != user_max_freq)
 		i++;
 
-	limit_idx_low = 4;
-	limit_idx_high = limit_idx = i - 1;
+	limit_idx_low = 5;
+	limit_idx_high = limit_idx = i;
 	BUG_ON(limit_idx_high <= 0 || limit_idx_high <= limit_idx_low);
 fail:
 	return ret;
@@ -1101,8 +1107,15 @@ static void __ref do_freq_control(long temp)
 {
 	uint32_t cpu = 0;
 	uint32_t max_freq = cpus[cpu].limited_max_freq;
+	struct cpufreq_policy *policy = cpufreq_cpu_get(0);
 
 	if (temp >= temp_threshold) {
+		if (!is_throttling)
+		{
+			user_max_freq = policy->max;
+			is_throttling = true;	
+		}
+
 		if (limit_idx == limit_idx_low)
 			return;
 
