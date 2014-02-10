@@ -34,7 +34,7 @@
 
 #define MAKO_HOTPLUG "mako_hotplug"
 
-#define DEFAULT_load_threshold 60
+#define DEFAULT_LOAD_THRESHOLD 60
 #define DEFAULT_HIGH_LOAD_COUNTER 10
 #define DEFAULT_MAX_LOAD_COUNTER 20
 #define DEFAULT_CPUFREQ_UNPLUG_LIMIT 1000000
@@ -237,6 +237,8 @@ static void __ref mako_hotplug_resume(struct work_struct *work)
 {
 	int cpu;
 
+	pr_info("%s: resume\n", MAKO_HOTPLUG);
+
 	for_each_possible_cpu(cpu)
 	{
 		if (!cpu)
@@ -250,9 +252,9 @@ static int lcd_notifier_callback(struct notifier_block *this,
 									unsigned long event, void *data)
 {
 	if (event == LCD_EVENT_ON_START)
-		schedule_work(&resume);	
+		queue_work_on(0, wq, &resume);
 	else if (event == LCD_EVENT_OFF_START)
-		schedule_work(&suspend);
+		queue_work_on(0, wq, &suspend);
 
 	return NOTIFY_OK;
 }
@@ -454,7 +456,7 @@ static int __devinit mako_hotplug_probe(struct platform_device *pdev)
 	int ret = 0;
 	struct hotplug_tunables *t = &tunables;
 
-	wq = alloc_workqueue("mako_hotplug_workqueue", WQ_HIGHPRI | WQ_FREEZABLE, 0);
+	wq = alloc_workqueue("mako_hotplug_workqueue", WQ_HIGHPRI | WQ_FREEZABLE, 1);
     
 	if (!wq)
 	{
@@ -462,7 +464,7 @@ static int __devinit mako_hotplug_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	t->load_threshold = DEFAULT_load_threshold;
+	t->load_threshold = DEFAULT_LOAD_THRESHOLD;
 	t->high_load_counter = DEFAULT_HIGH_LOAD_COUNTER;
 	t->max_load_counter = DEFAULT_MAX_LOAD_COUNTER;
 	t->cpufreq_unplug_limit = DEFAULT_CPUFREQ_UNPLUG_LIMIT;
