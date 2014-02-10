@@ -1174,9 +1174,9 @@ static void __ref check_temp(struct work_struct *work)
 	}
 
 	//do_core_control(temp);
-	do_vdd_restriction();
-	do_psm();
-	do_ocr();
+	//do_vdd_restriction();
+	//do_psm();
+	//do_ocr();
 	do_freq_control(temp);
 
 reschedule:
@@ -2570,44 +2570,13 @@ static int __devinit msm_thermal_dev_probe(struct platform_device *pdev)
 
 	key = "qcom,freq-control-mask";
 	ret = of_property_read_u32(node, key, &data.bootup_freq_control_mask);
-
-	ret = probe_cc(node, &data, pdev);
+	if (ret)
+		goto fail;
 
 	ret = probe_freq_mitigation(node, &data, pdev);
-	/*
-	 * Probe optional properties below. Call probe_psm before
-	 * probe_vdd_rstr because rpm_regulator_get has to be called
-	 * before devm_regulator_get
-	 * probe_ocr should be called after probe_vdd_rstr to reuse the
-	 * regualtor handle. calling devm_regulator_get more than once
-	 * will fail.
-	 */
-	ret = probe_psm(node, &data, pdev);
-	if (ret == -EPROBE_DEFER)
+	if (ret)
 		goto fail;
-	ret = probe_vdd_rstr(node, &data, pdev);
-	if (ret == -EPROBE_DEFER)
-		goto fail;
-	ret = probe_ocr(node, &data, pdev);
-	if (ret == -EPROBE_DEFER)
-		goto fail;
-
-	/*
-	 * In case sysfs add nodes get called before probe function.
-	 * Need to make sure sysfs node is created again
-	 */
-	if (psm_nodes_called) {
-		msm_thermal_add_psm_nodes();
-		psm_nodes_called = false;
-	}
-	if (vdd_rstr_nodes_called) {
-		msm_thermal_add_vdd_rstr_nodes();
-		vdd_rstr_nodes_called = false;
-	}
-	if (ocr_nodes_called) {
-		msm_thermal_add_ocr_nodes();
-		ocr_nodes_called = false;
-	}
+	
 	msm_thermal_ioctl_init();
 	ret = msm_thermal_init(&data);
 
@@ -2648,11 +2617,6 @@ int __init msm_thermal_device_init(void)
 
 int __init msm_thermal_late_init(void)
 {
-	if (num_possible_cpus() > 1)
-		msm_thermal_add_cc_nodes();
-	msm_thermal_add_psm_nodes();
-	msm_thermal_add_vdd_rstr_nodes();
-	msm_thermal_add_ocr_nodes();
 	alarm_init(&thermal_rtc, ANDROID_ALARM_ELAPSED_REALTIME_WAKEUP,
 			thermal_rtc_callback);
 	INIT_WORK(&timer_work, timer_work_fn);
