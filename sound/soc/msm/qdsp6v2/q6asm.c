@@ -332,12 +332,15 @@ static void config_debug_fs_init(void)
 static int q6asm_session_alloc(struct audio_client *ac)
 {
 	int n;
+	mutex_lock(&session_lock);
 	for (n = 1; n <= SESSION_MAX; n++) {
 		if (!session[n]) {
 			session[n] = ac;
+			mutex_unlock(&session_lock);
 			return n;
 		}
 	}
+	mutex_unlock(&session_lock);
 	return -ENOMEM;
 }
 
@@ -345,7 +348,9 @@ static void q6asm_session_free(struct audio_client *ac)
 {
 	pr_debug("%s: sessionid[%d]\n", __func__, ac->session);
 	rtac_remove_popp_from_adm_devices(ac->session);
+	mutex_lock(&session_lock);
 	session[ac->session] = 0;
+	mutex_unlock(&session_lock);
 	ac->session = 0;
 	ac->perf_mode = 0;
 	ac->fptr_cache_ops = NULL;
@@ -559,9 +564,6 @@ void q6asm_audio_client_free(struct audio_client *ac)
 	struct audio_port_data *port;
 	if (!ac || !ac->session)
 		return;
-
-	mutex_lock(&session_lock);
-
 	pr_debug("%s: Session id %d\n", __func__, ac->session);
 	if (ac->io_mode & SYNC_IO_MODE) {
 		for (loopcnt = 0; loopcnt <= OUT; loopcnt++) {
@@ -584,8 +586,6 @@ void q6asm_audio_client_free(struct audio_client *ac)
 /*done:*/
 	kfree(ac);
 	ac = NULL;
-	mutex_unlock(&session_lock);
-
 	return;
 }
 
@@ -644,13 +644,9 @@ struct audio_client *q6asm_audio_client_alloc(app_cb cb, void *priv)
 	ac = kzalloc(sizeof(struct audio_client), GFP_KERNEL);
 	if (!ac)
 		return NULL;
-
-	mutex_lock(&session_lock);
 	n = q6asm_session_alloc(ac);
-	if (n <= 0) {
-		mutex_unlock(&session_lock);
+	if (n <= 0)
 		goto fail_session;
-	}
 	ac->session = n;
 	ac->cb = cb;
 	ac->priv = priv;
@@ -664,18 +660,14 @@ struct audio_client *q6asm_audio_client_alloc(app_cb cb, void *priv)
 
 	if (ac->apr == NULL) {
 		pr_err("%s Registration with APR failed\n", __func__);
-		mutex_unlock(&session_lock);
-		goto fail;
+			goto fail;
 	}
-
 	rtac_set_asm_handle(n, ac->apr);
 
 	pr_debug("%s Registering the common port with APR\n", __func__);
 	ac->mmap_apr = q6asm_mmap_apr_reg();
-	if (ac->mmap_apr == NULL) {
-		mutex_unlock(&session_lock);
+	if (ac->mmap_apr == NULL)
 		goto fail;
-        }
 
 	init_waitqueue_head(&ac->cmd_wait);
 	init_waitqueue_head(&ac->time_wait);
@@ -694,8 +686,6 @@ struct audio_client *q6asm_audio_client_alloc(app_cb cb, void *priv)
 	send_asm_custom_topology(ac);
 
 	pr_debug("%s: session[%d]\n", __func__, ac->session);
-
-	mutex_unlock(&session_lock);
 
 	return ac;
 fail:
@@ -898,11 +888,8 @@ static int32_t q6asm_mmapcallback(struct apr_client_data *data, void *priv)
 {
 	uint32_t sid = 0;
 	uint32_t dir = 0;
-	uint32_t i = IN;
 	uint32_t *payload;
 	unsigned long dsp_flags;
-	struct asm_buffer_node *buf_node = NULL;
-	struct list_head *ptr, *next;
 
 	struct audio_client *ac = NULL;
 	struct audio_port_data *port;
@@ -921,20 +908,6 @@ static int32_t q6asm_mmapcallback(struct apr_client_data *data, void *priv)
 				data->reset_proc,
 				this_mmap.apr);
 		apr_reset(this_mmap.apr);
-		for (; i <= OUT; i++) {
-			list_for_each_safe(ptr, next,
-				&common_client.port[i].mem_map_handle) {
-				buf_node = list_entry(ptr,
-						struct asm_buffer_node,
-						list);
-				if (buf_node->buf_addr_lsw ==
-				common_client.port[i].buf->phys) {
-					list_del(&buf_node->list);
-					kfree(buf_node);
-				}
-			}
-			pr_debug("%s:Clearing custom topology\n", __func__);
-		}
 		this_mmap.apr = NULL;
 		reset_custom_topology_flags();
 		set_custom_topology = 1;
@@ -2780,9 +2753,6 @@ int q6asm_memory_unmap(struct audio_client *ac, uint32_t buf_add, int dir)
 		rc = -EINVAL;
 		goto fail_cmd;
 	}
-
-	rc = 0;
-fail_cmd:
 	list_for_each_safe(ptr, next, &ac->port[dir].mem_map_handle) {
 		buf_node = list_entry(ptr, struct asm_buffer_node,
 						list);
@@ -2792,6 +2762,9 @@ fail_cmd:
 			break;
 		}
 	}
+
+	rc = 0;
+fail_cmd:
 	return rc;
 }
 
@@ -2959,9 +2932,6 @@ static int q6asm_memory_unmap_regions(struct audio_client *ac, int dir)
 		pr_err("timeout. waited for memory_unmap\n");
 		goto fail_cmd;
 	}
-	rc = 0;
-
-fail_cmd:
 	list_for_each_safe(ptr, next, &ac->port[dir].mem_map_handle) {
 		buf_node = list_entry(ptr, struct asm_buffer_node,
 						list);
@@ -2971,6 +2941,9 @@ fail_cmd:
 			break;
 		}
 	}
+	rc = 0;
+
+fail_cmd:
 	return rc;
 }
 
