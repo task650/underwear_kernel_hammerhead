@@ -108,7 +108,8 @@ int ion_heap_map_user(struct ion_heap *heap, struct ion_buffer *buffer,
  *
  * Note that the `pages' array should be composed of all 4K pages.
  */
-int ion_heap_pages_zero(struct page **pages, int num_pages)
+int ion_heap_pages_zero(struct page **pages, int num_pages,
+				bool should_invalidate)
 {
 	int i, j, k, npages_to_vmap;
 	void *ptr = NULL;
@@ -142,17 +143,19 @@ int ion_heap_pages_zero(struct page **pages, int num_pages)
 			return -ENOMEM;
 
 		memset(ptr, 0, npages_to_vmap * PAGE_SIZE);
-		/*
-		 * invalidate the cache to pick up the zeroing
-		 */
-		for (k = 0; k < npages_to_vmap; k++) {
-			void *p = kmap_atomic(pages[i + k]);
-			phys_addr_t phys = page_to_phys(
-				pages[i + k]);
+		if (should_invalidate) {
+			/*
+			 * invalidate the cache to pick up the zeroing
+			 */
+			for (k = 0; k < npages_to_vmap; k++) {
+				void *p = kmap_atomic(pages[i + k]);
+				phys_addr_t phys = page_to_phys(
+							pages[i + k]);
 
-			dmac_inv_range(p, p + PAGE_SIZE);
-			outer_inv_range(phys, phys + PAGE_SIZE);
-			kunmap_atomic(p);
+				dmac_inv_range(p, p + PAGE_SIZE);
+				outer_inv_range(phys, phys + PAGE_SIZE);
+				kunmap_atomic(p);
+			}
 		}
 		vunmap(ptr);
 	}
@@ -193,7 +196,8 @@ static void ion_heap_free_pages_mem(struct pages_mem *pages_mem)
 	pages_mem->free_fn(pages_mem->pages);
 }
 
-int ion_heap_high_order_page_zero(struct page *page, int order)
+int ion_heap_high_order_page_zero(struct page *page,
+				int order, bool should_invalidate)
 {
 	int i, ret;
 	struct pages_mem pages_mem;
@@ -206,7 +210,8 @@ int ion_heap_high_order_page_zero(struct page *page, int order)
 	for (i = 0; i < (1 << order); ++i)
 		pages_mem.pages[i] = page + i;
 
-	ret = ion_heap_pages_zero(pages_mem.pages, npages);
+	ret = ion_heap_pages_zero(pages_mem.pages, npages,
+				should_invalidate);
 	ion_heap_free_pages_mem(&pages_mem);
 	return ret;
 }
@@ -235,7 +240,8 @@ int ion_heap_buffer_zero(struct ion_buffer *buffer)
 			pages_mem.pages[npages++] = page + j;
 	}
 
-	ret = ion_heap_pages_zero(pages_mem.pages, npages);
+	ret = ion_heap_pages_zero(pages_mem.pages, npages,
+				ion_buffer_cached(buffer));
 	ion_heap_free_pages_mem(&pages_mem);
 	return ret;
 }
