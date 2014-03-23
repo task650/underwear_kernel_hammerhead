@@ -25,7 +25,6 @@
 #include <linux/timer.h>
 #include <linux/cpufreq.h>
 #include <linux/delay.h>
-#include <linux/hotplug.h>
 #include <linux/input.h>
 #include <linux/jiffies.h>
 
