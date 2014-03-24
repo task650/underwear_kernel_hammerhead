@@ -22,28 +22,27 @@
 
 static struct gpiomux_setting ap2mdm_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_2MA,
+	.drv = GPIOMUX_DRV_8MA,
 	.pull = GPIOMUX_PULL_NONE,
-	.dir = GPIOMUX_OUT_LOW,
 };
 
 static struct gpiomux_setting mdm2ap_status_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_2MA,
-	.pull = GPIOMUX_PULL_NONE,
-	.dir = GPIOMUX_OUT_LOW,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_DOWN,
+	.dir = GPIOMUX_IN,
 };
 
 static struct gpiomux_setting mdm2ap_errfatal_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_2MA,
-	.pull = GPIOMUX_PULL_NONE,
-	.dir = GPIOMUX_OUT_LOW,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_DOWN,
+	.dir = GPIOMUX_IN,
 };
 
 static struct gpiomux_setting mdm2ap_pblrdy = {
 	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_2MA,
+	.drv = GPIOMUX_DRV_8MA,
 	.pull = GPIOMUX_PULL_NONE,
 	.dir = GPIOMUX_IN,
 };
@@ -51,16 +50,14 @@ static struct gpiomux_setting mdm2ap_pblrdy = {
 
 static struct gpiomux_setting ap2mdm_soft_reset_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_2MA,
+	.drv = GPIOMUX_DRV_8MA,
 	.pull = GPIOMUX_PULL_NONE,
-	.dir = GPIOMUX_OUT_LOW,
 };
 
 static struct gpiomux_setting ap2mdm_wakeup = {
 	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_2MA,
-	.pull = GPIOMUX_PULL_NONE,
-	.dir = GPIOMUX_OUT_LOW,
+	.drv = GPIOMUX_DRV_8MA,
+	.pull = GPIOMUX_PULL_DOWN,
 };
 
 static struct msm_gpiomux_config mdm_configs[] __initdata = {
@@ -145,11 +142,6 @@ static struct gpiomux_setting gpio_spi_config = {
 	.func = GPIOMUX_FUNC_1,
 	.drv = GPIOMUX_DRV_12MA,
 	.pull = GPIOMUX_PULL_NONE,
-};
-static struct gpiomux_setting gpio_spi_susp_config = {
-	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_2MA,
-	.pull = GPIOMUX_PULL_DOWN,
 };
 
 static struct gpiomux_setting gpio_spi_cs1_config = {
@@ -532,36 +524,31 @@ static struct msm_gpiomux_config msm_blsp_configs[] __initdata = {
 	{
 		.gpio      = 0,		/* BLSP1 QUP SPI_DATA_MOSI */
 		.settings = {
-			[GPIOMUX_ACTIVE] = &gpio_spi_config,
-			[GPIOMUX_SUSPENDED] = &gpio_spi_susp_config,
+			[GPIOMUX_SUSPENDED] = &gpio_spi_config,
 		},
 	},
 	{
 		.gpio      = 1,		/* BLSP1 QUP SPI_DATA_MISO */
 		.settings = {
-			[GPIOMUX_ACTIVE] = &gpio_spi_config,
-			[GPIOMUX_SUSPENDED] = &gpio_spi_susp_config,
+			[GPIOMUX_SUSPENDED] = &gpio_spi_config,
 		},
 	},
 	{
 		.gpio      = 3,		/* BLSP1 QUP SPI_CLK */
 		.settings = {
-			[GPIOMUX_ACTIVE] = &gpio_spi_config,
-			[GPIOMUX_SUSPENDED] = &gpio_spi_susp_config,
+			[GPIOMUX_SUSPENDED] = &gpio_spi_config,
 		},
 	},
 	{
 		.gpio      = 9,		/* BLSP1 QUP SPI_CS2A_N */
 		.settings = {
-			[GPIOMUX_ACTIVE] = &gpio_spi_cs2_config,
-			[GPIOMUX_SUSPENDED] = &gpio_spi_susp_config,
+			[GPIOMUX_SUSPENDED] = &gpio_spi_cs2_config,
 		},
 	},
 	{
 		.gpio      = 8,		/* BLSP1 QUP SPI_CS1_N */
 		.settings = {
-			[GPIOMUX_ACTIVE] = &gpio_spi_cs1_config,
-			[GPIOMUX_SUSPENDED] = &gpio_spi_susp_config,
+			[GPIOMUX_SUSPENDED] = &gpio_spi_cs1_config,
 		},
 	},
 #endif

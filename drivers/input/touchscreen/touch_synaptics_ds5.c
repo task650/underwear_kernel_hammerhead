@@ -225,7 +225,7 @@ static int synaptics_t1320_power_on(struct i2c_client *client, int on)
 /* Debug mask value
  * usage: echo [debug_mask] > /sys/module/touch_synaptics/parameters/debug_mask
  */
-static u32 touch_debug_mask = 0;
+static u32 touch_debug_mask = DEBUG_BASE_INFO | DEBUG_FW_UPGRADE;
 module_param_named(debug_mask, touch_debug_mask, int, S_IRUGO|S_IWUSR|S_IWGRP);
 
 static int touch_power_cntl(struct synaptics_ts_data *ts, int onoff);

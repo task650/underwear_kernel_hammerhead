@@ -381,10 +381,6 @@
 		compatible = "qcom,msm-compr-dsp";
 	};
 
-	qcom,msm-compress-dsp {
-		compatible = "qcom,msm-compress-dsp";
-	};
-
 	qcom,msm-voip-dsp {
 		compatible = "qcom,msm-voip-dsp";
 	};
@@ -855,7 +851,7 @@
 	tsens: tsens@fc4a8000 {
 		compatible = "qcom,msm-tsens";
 		reg = <0xfc4a8000 0x2000>,
-		      <0xfc4bc000 0x1000>;
+		      <0xfc4b8000 0x1000>;
 		reg-names = "tsens_physical", "tsens_eeprom_physical";
 		interrupts = <0 184 0>;
 		qcom,sensors = <4>;
@@ -1011,12 +1007,6 @@
 		qcom,msm-bus,vectors-KBps =
 				<55 512 0 0>,
 				<55 512 3936000 393600>;
-	};
-
-	cpu-pmu {
-		compatible = "arm,cortex-a7-pmu";
-		qcom,irq-is-percpu;
-		interrupts = <1 7 0xf00>;
 	};
 };
 

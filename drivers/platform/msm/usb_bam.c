@@ -94,7 +94,6 @@ struct usb_bam_ctx_type {
 	u8 pipes_enabled_per_bam[MAX_BAMS];
 	u32 inactivity_timer_ms[MAX_BAMS];
 	bool is_bam_inactivity[MAX_BAMS];
-	struct completion reset_done;
 };
 
 static char *bam_enable_strings[MAX_BAMS] = {
@@ -171,6 +170,7 @@ static struct usb_bam_pipe_connect *usb_bam_connections;
 static struct usb_bam_ctx_type ctx;
 
 static struct device *hsic_host_dev;
+static bool hsic_host_dev_resumed_from_cons_request;
 
 static int __usb_bam_register_wake_cb(u8 idx, int (*callback)(void *user),
 	void *param, bool trigger_cb_per_pipe);
@@ -905,6 +905,7 @@ static int cons_request_resource(enum usb_bam cur_bam)
 
 		break;
 	case HSIC_BAM:
+			hsic_host_dev_resumed_from_cons_request = true;
 
 			usb_bam_resume_hsic_host();
 
@@ -973,6 +974,8 @@ static int cons_release_resource(enum usb_bam cur_bam)
 			(int)hsic_host_dev);
 			pm_runtime_put(hsic_host_dev);
 			info.in_lpm[HSIC_BAM] = true;
+			/* In case consumer release before resume happned */
+			hsic_host_dev_resumed_from_cons_request = false;
 		}
 	}
 
@@ -1314,6 +1317,9 @@ void usb_bam_resume(struct usb_bam_connect_ipa_params *ipa_params)
 
 void msm_bam_wait_for_hsic_prod_granted(void)
 {
+	if (hsic_host_dev_resumed_from_cons_request)
+		return;
+
 	ctx.is_bam_inactivity[HSIC_BAM] = false;
 
 	/* Get back to resume state including wakeup ipa */
@@ -1331,8 +1337,11 @@ void msm_bam_hsic_notify_on_resume(void)
 	 * and clocked on. Therefore we can now set the inactivity
 	 * timer to the hsic bam hw.
 	 */
-	if (ctx.inactivity_timer_ms[HSIC_BAM])
+	if (ctx.inactivity_timer_ms[HSIC_BAM] &&
+	    !hsic_host_dev_resumed_from_cons_request)
 		usb_bam_set_inactivity_timer(HSIC_BAM);
+
+	hsic_host_dev_resumed_from_cons_request = false;
 }
 
 bool msm_bam_hsic_lpm_ok(void)
@@ -1528,10 +1537,6 @@ int usb_bam_client_ready(bool ready)
 	}
 
 	peer_handshake_info.client_ready = ready;
-	if (peer_handshake_info.state == USB_BAM_SM_PLUG_ACKED && !ready) {
-		pr_debug("Starting reset sequence");
-		INIT_COMPLETION(ctx.reset_done);
-	}
 
 	spin_unlock(&usb_bam_peer_handshake_info_lock);
 	if (!queue_work(ctx.usb_bam_wq,
@@ -1733,7 +1738,6 @@ static void usb_bam_sm_work(struct work_struct *w)
 	case USB_BAM_SM_PLUG_ACKED:
 		if (!peer_handshake_info.client_ready) {
 			spin_unlock(&usb_bam_peer_handshake_info_lock);
-			pr_debug("Starting A2 reset sequence");
 			smsm_change_state(SMSM_APPS_STATE,
 				SMSM_USB_PLUG_UNPLUG, 0);
 			spin_lock(&usb_bam_peer_handshake_info_lock);
@@ -1746,8 +1750,6 @@ static void usb_bam_sm_work(struct work_struct *w)
 			peer_handshake_info.reset_event.
 				callback(peer_handshake_info.reset_event.param);
 			spin_lock(&usb_bam_peer_handshake_info_lock);
-			complete_all(&ctx.reset_done);
-			pr_debug("Finished reset sequence");
 			peer_handshake_info.state = USB_BAM_SM_INIT;
 			peer_handshake_info.ack_received = 0;
 		}
@@ -2031,17 +2033,7 @@ int usb_bam_disconnect_ipa(struct usb_bam_connect_ipa_params *ipa_params)
 }
 EXPORT_SYMBOL(usb_bam_disconnect_ipa);
 
-void usb_bam_reset_complete(void)
-{
-	pr_debug("Waiting for reset compelte");
-	if (wait_for_completion_interruptible_timeout(&ctx.reset_done,
-			10*HZ) <= 0)
-		pr_warn("Timeout while waiting for reset");
-
-	pr_debug("Finished Waiting for reset complete");
-}
-
-int usb_bam_a2_reset(bool to_reconnect)
+int usb_bam_a2_reset(void)
 {
 	struct usb_bam_pipe_connect *pipe_connect;
 	int i;
@@ -2081,9 +2073,6 @@ int usb_bam_a2_reset(bool to_reconnect)
 	/* Reset A2 (USB/HSIC) BAM */
 	if (bam != -1 && sps_device_reset(ctx.h_bam[bam]))
 		pr_err("%s: BAM reset failed\n", __func__);
-
-	if (!to_reconnect)
-		return ret;
 
 	/* Reconnect A2 pipes */
 	for (i = 0; i < ctx.max_connections; i++) {
@@ -2560,8 +2549,6 @@ static int usb_bam_probe(struct platform_device *pdev)
 
 	spin_lock_init(&usb_bam_peer_handshake_info_lock);
 	INIT_WORK(&peer_handshake_info.reset_event.event_w, usb_bam_sm_work);
-	init_completion(&ctx.reset_done);
-	complete(&ctx.reset_done);
 
 	ctx.usb_bam_wq = alloc_workqueue("usb_bam_wq",
 		WQ_UNBOUND | WQ_MEM_RECLAIM, 1);

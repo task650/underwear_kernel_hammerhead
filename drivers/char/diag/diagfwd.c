@@ -259,7 +259,7 @@ void process_lock_on_notify(struct diag_nrt_wake_lock *lock)
 	 * Do not work with ref_count here in case
 	 * of spurious interrupt
 	 */
-	if (lock->enabled && !wake_lock_active(&lock->read_lock))
+	if (lock->enabled)
 		wake_lock(&lock->read_lock);
 	spin_unlock_irqrestore(&lock->read_spinlock, read_lock_flags);
 }
@@ -502,9 +502,10 @@ int diag_device_write(void *buf, int data_type, struct diag_request *write_ptr)
 					driver->buf_tbl[i].length =
 								 driver->used;
 #ifdef DIAG_DEBUG
-					pr_debug("diag: ENQUEUE buf ptr and length is %p , %d\n",
-						 driver->buf_tbl[i].buf,
-						 driver->buf_tbl[i].length);
+					pr_debug("diag: ENQUEUE buf ptr"
+						   " and length is %x , %d\n",
+						   (unsigned int)(driver->buf_
+				tbl[i].buf), driver->buf_tbl[i].length);
 #endif
 					break;
 				}
@@ -537,9 +538,9 @@ int diag_device_write(void *buf, int data_type, struct diag_request *write_ptr)
 			if (foundIndex == -1)
 				err = -1;
 			else
-				pr_debug("diag: ENQUEUE HSIC buf ptr and length is %p , %d, ch %d\n",
-					 buf, diag_bridge[index].write_len,
-					 index);
+				pr_debug("diag: ENQUEUE HSIC buf ptr and length is %x , %d, ch %d\n",
+					(unsigned int)buf,
+					 diag_bridge[index].write_len, index);
 		}
 #endif
 		for (i = 0; i < driver->num_clients; i++)
@@ -1240,7 +1241,7 @@ static inline void diag_send_error_rsp(int index) {}
 void diag_process_hdlc(void *data, unsigned len)
 {
 	struct diag_hdlc_decode_type hdlc;
-	int ret, type = 0, crc_chk = 0;
+	int ret, type = 0;
 
 	mutex_lock(&driver->diag_hdlc_mutex);
 
@@ -1254,16 +1255,6 @@ void diag_process_hdlc(void *data, unsigned len)
 	hdlc.escaping = 0;
 
 	ret = diag_hdlc_decode(&hdlc);
-	if (ret) {
-		crc_chk = crc_check(hdlc.dest_ptr, hdlc.dest_idx);
-		if (crc_chk) {
-			/* CRC check failed. */
-			pr_err_ratelimited("diag: In %s, bad CRC. Dropping packet\n",
-								__func__);
-			mutex_unlock(&driver->diag_hdlc_mutex);
-			return;
-		}
-	}
 
 	/*
 	 * If the message is 3 bytes or less in length then the message is
@@ -1286,8 +1277,9 @@ void diag_process_hdlc(void *data, unsigned len)
 			return;
 		}
 	} else if (driver->debug_flag) {
-		pr_err("diag: In %s, partial packet received, dropping packet, len: %d\n",
-								__func__, len);
+		printk(KERN_ERR "Packet dropped due to bad HDLC coding/CRC"
+				" errors or partial packet received, packet"
+				" length = %d\n", len);
 		print_hex_dump(KERN_DEBUG, "Dropped Packet Data: ", 16, 1,
 					   DUMP_PREFIX_ADDRESS, data, len, 1);
 		driver->debug_flag = 0;

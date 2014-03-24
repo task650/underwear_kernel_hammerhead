@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
  * Author: Brian Swetland <swetland@google.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -129,10 +129,6 @@ static int audio_output_latency_dbgfs_open(struct inode *inode,
 static ssize_t audio_output_latency_dbgfs_read(struct file *file,
 				char __user *buf, size_t count, loff_t *ppos)
 {
-	if (out_buffer == NULL) {
-		pr_err("%s: out_buffer is null\n", __func__);
-		return 0;
-	}
 	snprintf(out_buffer, OUT_BUFFER_SIZE, "%ld,%ld,%ld,%ld,%ld,%ld,",\
 		out_cold_tv.tv_sec, out_cold_tv.tv_usec, out_warm_tv.tv_sec,\
 		out_warm_tv.tv_usec, out_cont_tv.tv_sec, out_cont_tv.tv_usec);
@@ -178,10 +174,6 @@ static int audio_input_latency_dbgfs_open(struct inode *inode,
 static ssize_t audio_input_latency_dbgfs_read(struct file *file,
 				char __user *buf, size_t count, loff_t *ppos)
 {
-	if (in_buffer == NULL) {
-		pr_err("%s: in_buffer is null\n", __func__);
-		return 0;
-	}
 	snprintf(in_buffer, IN_BUFFER_SIZE, "%ld,%ld,",\
 				in_cont_tv.tv_sec, in_cont_tv.tv_usec);
 	return  simple_read_from_buffer(buf, IN_BUFFER_SIZE, ppos,
@@ -297,38 +289,17 @@ static void config_debug_fs_write(struct audio_buffer *ab)
 static void config_debug_fs_init(void)
 {
 	out_buffer = kmalloc(OUT_BUFFER_SIZE, GFP_KERNEL);
-	if (out_buffer == NULL) {
-		pr_err("%s: kmalloc() for out_buffer failed\n", __func__);
-		goto outbuf_fail;
-	}
-	in_buffer = kmalloc(IN_BUFFER_SIZE, GFP_KERNEL);
-	if (in_buffer == NULL) {
-		pr_err("%s: kmalloc() for in_buffer failed\n", __func__);
-		goto inbuf_fail;
-	}
 	out_dentry = debugfs_create_file("audio_out_latency_measurement_node",\
 				S_IRUGO | S_IWUSR | S_IWGRP,\
 				NULL, NULL, &audio_output_latency_debug_fops);
-	if (IS_ERR(out_dentry)) {
-		pr_err("%s: debugfs_create_file failed\n", __func__);
-		goto file_fail;
-	}
+	if (IS_ERR(out_dentry))
+		pr_err("debugfs_create_file failed\n");
+	in_buffer = kmalloc(IN_BUFFER_SIZE, GFP_KERNEL);
 	in_dentry = debugfs_create_file("audio_in_latency_measurement_node",\
 				S_IRUGO | S_IWUSR | S_IWGRP,\
 				NULL, NULL, &audio_input_latency_debug_fops);
-	if (IS_ERR(in_dentry)) {
-		pr_err("%s: debugfs_create_file failed\n", __func__);
-		goto file_fail;
-	}
-	return;
-file_fail:
-	kfree(in_buffer);
-inbuf_fail:
-	kfree(out_buffer);
-outbuf_fail:
-	in_buffer = NULL;
-	out_buffer = NULL;
-	return;
+	if (IS_ERR(in_dentry))
+		pr_err("debugfs_create_file failed\n");
 }
 #else
 static void config_debug_fs_write(struct audio_buffer *ab)
@@ -1100,7 +1071,6 @@ static int32_t q6asm_callback(struct apr_client_data *data, void *priv)
 					data->payload_size))
 				break;
 		case ASM_SESSION_CMD_PAUSE:
-		case ASM_SESSION_CMD_SUSPEND:
 		case ASM_DATA_CMD_EOS:
 		case ASM_STREAM_CMD_CLOSE:
 		case ASM_STREAM_CMD_FLUSH:
@@ -1459,11 +1429,14 @@ static void q6asm_add_mmaphdr(struct audio_client *ac, struct apr_hdr *hdr,
 	hdr->pkt_size  = pkt_size;
 	return;
 }
-static int __q6asm_open_read(struct audio_client *ac,
-		uint32_t format, uint16_t bits_per_sample)
+int q6asm_open_read(struct audio_client *ac,
+		uint32_t format)
 {
 	int rc = 0x00;
 	struct asm_stream_cmd_open_read_v3 open;
+
+	uint16_t bits_per_sample = 16;
+
 
 	config_debug_fs_reset_index();
 
@@ -1537,18 +1510,6 @@ static int __q6asm_open_read(struct audio_client *ac,
 	return 0;
 fail_cmd:
 	return -EINVAL;
-}
-
-int q6asm_open_read(struct audio_client *ac,
-		uint32_t format)
-{
-	return __q6asm_open_read(ac, format, 16);
-}
-
-int q6asm_open_read_v2(struct audio_client *ac, uint32_t format,
-			uint16_t bits_per_sample)
-{
-	return __q6asm_open_read(ac, format, bits_per_sample);
 }
 
 static int __q6asm_open_write(struct audio_client *ac, uint32_t format,
@@ -1905,8 +1866,8 @@ fail_cmd:
 		return rc;
 }
 
-static int __q6asm_enc_cfg_blk_pcm(struct audio_client *ac,
-		uint32_t rate, uint32_t channels, uint16_t bits_per_sample)
+int q6asm_enc_cfg_blk_pcm(struct audio_client *ac,
+			uint32_t rate, uint32_t channels)
 {
 	struct asm_multi_channel_pcm_enc_cfg_v2  enc_cfg;
 	u8 *channel_mapping;
@@ -1927,7 +1888,7 @@ static int __q6asm_enc_cfg_blk_pcm(struct audio_client *ac,
 					sizeof(struct asm_enc_cfg_blk_param_v2);
 
 	enc_cfg.num_channels = channels;
-	enc_cfg.bits_per_sample = bits_per_sample;
+	enc_cfg.bits_per_sample = 16;
 	enc_cfg.sample_rate = rate;
 	enc_cfg.is_signed = 1;
 	channel_mapping = enc_cfg.channel_mapping;
@@ -1952,18 +1913,6 @@ static int __q6asm_enc_cfg_blk_pcm(struct audio_client *ac,
 	return 0;
 fail_cmd:
 	return -EINVAL;
-}
-
-int q6asm_enc_cfg_blk_pcm(struct audio_client *ac,
-			uint32_t rate, uint32_t channels)
-{
-	return __q6asm_enc_cfg_blk_pcm(ac, rate, channels, 16);
-}
-
-int q6asm_enc_cfg_blk_pcm_format_support(struct audio_client *ac,
-		uint32_t rate, uint32_t channels, uint16_t bits_per_sample)
-{
-	 return __q6asm_enc_cfg_blk_pcm(ac, rate, channels, bits_per_sample);
 }
 
 int q6asm_enc_cfg_blk_pcm_native(struct audio_client *ac,
@@ -3721,11 +3670,6 @@ int q6asm_cmd(struct audio_client *ac, int cmd)
 	case CMD_PAUSE:
 		pr_debug("%s:CMD_PAUSE\n", __func__);
 		hdr.opcode = ASM_SESSION_CMD_PAUSE;
-		state = &ac->cmd_state;
-		break;
-	case CMD_SUSPEND:
-		pr_debug("%s:CMD_SUSPEND\n", __func__);
-		hdr.opcode = ASM_SESSION_CMD_SUSPEND;
 		state = &ac->cmd_state;
 		break;
 	case CMD_FLUSH:

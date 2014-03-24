@@ -13,7 +13,6 @@
 
 #include <linux/kernel.h>
 #include <linux/errno.h>
-#include <linux/err.h>
 
 #include <linux/clk.h>
 #include <mach/clk-provider.h>
@@ -38,23 +37,8 @@ static int mux_set_parent(struct clk *c, struct clk *p)
 	struct mux_clk *mux = to_mux_clk(c);
 	int sel = parent_to_src_sel(mux, p);
 	struct clk *old_parent;
-	int rc = 0, i;
+	int rc = 0;
 	unsigned long flags;
-
-	if (sel < 0 && mux->rec_set_par) {
-		for (i = 0; i < mux->num_parents; i++) {
-			rc = clk_set_parent(mux->parents[i].src, p);
-			if (!rc) {
-				sel = mux->parents[i].sel;
-				/*
-				 * This is necessary to ensure prepare/enable
-				 * counts get propagated correctly.
-				 */
-				p = mux->parents[i].src;
-				break;
-			}
-		}
-	}
 
 	if (sel < 0)
 		return sel;
@@ -69,7 +53,6 @@ static int mux_set_parent(struct clk *c, struct clk *p)
 
 	old_parent = c->parent;
 	c->parent = p;
-	c->rate = clk_get_rate(p);
 	__clk_post_reparent(c, old_parent, &flags);
 
 	return 0;
@@ -84,17 +67,21 @@ static long mux_round_rate(struct clk *c, unsigned long rate)
 {
 	struct mux_clk *mux = to_mux_clk(c);
 	int i;
-	unsigned long prate, rrate = 0;
+	long prate, max_prate = 0, rrate = LONG_MAX;
 
 	for (i = 0; i < mux->num_parents; i++) {
 		prate = clk_round_rate(mux->parents[i].src, rate);
-		if (is_better_rate(rate, rrate, prate))
-			rrate = prate;
-	}
-	if (!rrate)
-		return -EINVAL;
+		if (prate < rate) {
+			max_prate = max(prate, max_prate);
+			continue;
+		}
 
-	return rrate;
+		rrate = min(rrate, prate);
+	}
+	if (rrate == LONG_MAX)
+		rrate = max_prate;
+
+	return rrate ? rrate : -EINVAL;
 }
 
 static int mux_set_rate(struct clk *c, unsigned long rate)
@@ -103,7 +90,6 @@ static int mux_set_rate(struct clk *c, unsigned long rate)
 	struct clk *new_parent = NULL;
 	int rc = 0, i;
 	unsigned long new_par_curr_rate;
-	unsigned long flags;
 
 	for (i = 0; i < mux->num_parents; i++) {
 		if (clk_round_rate(mux->parents[i].src, rate) == rate) {
@@ -119,16 +105,8 @@ static int mux_set_rate(struct clk *c, unsigned long rate)
 	 * same and the parent might temporarily turn off while switching
 	 * rates.
 	 */
-	if (mux->safe_sel >= 0) {
-		/*
-		 * Some mux implementations might switch to/from a low power
-		 * parent as part of their disable/enable ops. Grab the
-		 * enable lock to avoid racing with these implementations.
-		 */
-		spin_lock_irqsave(&c->lock, flags);
+	if (mux->safe_sel >= 0)
 		rc = mux->ops->set_mux_sel(mux, mux->safe_sel);
-		spin_unlock_irqrestore(&c->lock, flags);
-	}
 	if (rc)
 		return rc;
 
@@ -221,8 +199,8 @@ struct clk_ops clk_ops_gen_mux = {
 static long __div_round_rate(struct clk *c, unsigned long rate, int *best_div)
 {
 	struct div_clk *d = to_div_clk(c);
-	unsigned int div, min_div, max_div, rrate_div = 1;
-	unsigned long p_rrate, rrate = 0;
+	unsigned int div, min_div, max_div;
+	long p_rrate, rrate = LONG_MAX;
 
 	rate = max(rate, 1UL);
 
@@ -230,21 +208,15 @@ static long __div_round_rate(struct clk *c, unsigned long rate, int *best_div)
 		min_div = max_div = d->div;
 	else {
 		min_div = max(d->min_div, 1U);
-		max_div = min(d->max_div, (unsigned int) (ULONG_MAX / rate));
+		max_div = min(d->max_div, (unsigned int) (LONG_MAX / rate));
 	}
 
 	for (div = min_div; div <= max_div; div++) {
 		p_rrate = clk_round_rate(c->parent, rate * div);
-		if (IS_ERR_VALUE(p_rrate))
+		if (p_rrate < 0)
 			break;
 
 		p_rrate /= div;
-
-		if (is_better_rate(rate, rrate, p_rrate)) {
-			rrate = p_rrate;
-			rrate_div = div;
-		}
-
 		/*
 		 * Trying higher dividers is only going to ask the parent for
 		 * a higher rate. If it can't even output a rate higher than
@@ -252,17 +224,26 @@ static long __div_round_rate(struct clk *c, unsigned long rate, int *best_div)
 		 * going to be able to output an even higher rate required
 		 * for a higher divider. So, stop trying higher dividers.
 		 */
-		if (p_rrate < rate)
+		if (p_rrate < rate) {
+			if (rrate == LONG_MAX) {
+				rrate = p_rrate;
+				if (best_div)
+					*best_div = div;
+			}
 			break;
+		}
+		if (p_rrate < rrate) {
+			rrate = p_rrate;
+			if (best_div)
+				*best_div = div;
+		}
 
 		if (rrate <= rate + d->rate_margin)
 			break;
 	}
 
-	if (!rrate)
+	if (rrate == LONG_MAX)
 		return -EINVAL;
-	if (best_div)
-		*best_div = rrate_div;
 
 	return rrate;
 }
@@ -422,45 +403,3 @@ struct clk_ops clk_ops_slave_div = {
 	.set_rate = slave_div_set_rate,
 	.handoff = div_handoff,
 };
-
-
-/**
- * External clock
- * Some clock controllers have input clock signal that come from outside the
- * clock controller. That input clock signal might then be used as a source for
- * several clocks inside the clock controller. This external clock
- * implementation models this input clock signal by just passing on the requests
- * to the clock's parent, the original external clock source. The driver for the
- * clock controller should clk_get() the original external clock in the probe
- * function and set is as a parent to this external clock..
- */
-
-static long ext_round_rate(struct clk *c, unsigned long rate)
-{
-	return clk_round_rate(c->parent, rate);
-}
-
-static int ext_set_rate(struct clk *c, unsigned long rate)
-{
-	return clk_set_rate(c->parent, rate);
-}
-
-static int ext_set_parent(struct clk *c, struct clk *p)
-{
-	return clk_set_parent(c->parent, p);
-}
-
-static enum handoff ext_handoff(struct clk *c)
-{
-	c->rate = clk_get_rate(c->parent);
-	/* Similar reasoning applied in div_handoff, see comment there. */
-	return HANDOFF_DISABLED_CLK;
-}
-
-struct clk_ops clk_ops_ext = {
-	.handoff = ext_handoff,
-	.round_rate = ext_round_rate,
-	.set_rate = ext_set_rate,
-	.set_parent = ext_set_parent,
-};
-

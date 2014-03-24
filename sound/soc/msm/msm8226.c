@@ -75,11 +75,6 @@ static struct wcd9xxx_mbhc_config mbhc_cfg = {
 	.micbias_enable_flags = 0,
 	.insert_detect = true,
 	.swap_gnd_mic = NULL,
-	.cs_enable_flags = (1 << MBHC_CS_ENABLE_POLLING |
-			    1 << MBHC_CS_ENABLE_INSERTION |
-			    1 << MBHC_CS_ENABLE_REMOVAL),
-	.do_recalibration = true,
-	.use_vddio_meas = true,
 };
 
 struct msm_auxpcm_gpio {
@@ -651,7 +646,7 @@ void *def_tapan_mbhc_cal(void)
 	S(c[1], 124);
 	S(nc, 1);
 	S(n_meas, 5);
-	S(mbhc_nsc, 10);
+	S(mbhc_nsc, 11);
 	S(n_btn_meas, 1);
 	S(n_btn_con, 2);
 	S(num_btn, WCD9XXX_MBHC_DEF_BUTTONS);
@@ -896,7 +891,7 @@ static struct snd_soc_dai_link msm8226_dai[] = {
 		.name = "MSM8226 Compr",
 		.stream_name = "COMPR",
 		.cpu_dai_name	= "MultiMedia4",
-		.platform_name  = "msm-compress-dsp",
+		.platform_name  = "msm-compr-dsp",
 		.dynamic = 1,
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
 			 SND_SOC_DPCM_TRIGGER_POST},

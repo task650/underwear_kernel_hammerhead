@@ -336,9 +336,6 @@ int diag_find_polling_reg(int i)
 		else if (subsys_id == 0x32 && cmd_code_hi == 0x03  &&
 			 cmd_code_lo == 0x03)
 			return 1;
-		else if (subsys_id == 0x57 && cmd_code_hi >= 0x0E &&
-			 cmd_code_lo <= 0x0E)
-			return 1;
 	}
 	return 0;
 }
@@ -460,8 +457,8 @@ int diag_copy_remote(char __user *buf, size_t count, int *pret, int *pnum_data)
 
 		for (i = 0; i < diag_hsic[index].poolsize_hsic_write; i++) {
 			if (hsic_buf_tbl[i].length > 0) {
-				pr_debug("diag: HSIC copy to user, i: %d, buf: %p, len: %d\n",
-					i, hsic_buf_tbl[i].buf,
+				pr_debug("diag: HSIC copy to user, i: %d, buf: %x, len: %d\n",
+					i, (unsigned int)hsic_buf_tbl[i].buf,
 					hsic_buf_tbl[i].length);
 				num_data++;
 
@@ -1160,9 +1157,10 @@ static int diagchar_read(struct file *file, char __user *buf, size_t count,
 		for (i = 0; i < driver->buf_tbl_size; i++) {
 			if (driver->buf_tbl[i].length > 0) {
 #ifdef DIAG_DEBUG
-				pr_debug("diag: WRITING the buf address and length is %p , %d\n",
-					 driver->buf_tbl[i].buf,
-					 driver->buf_tbl[i].length);
+				pr_debug("diag: WRITING the buf address "
+				       "and length is %x , %d\n", (unsigned int)
+					(driver->buf_tbl[i].buf),
+					driver->buf_tbl[i].length);
 #endif
 				num_data++;
 				/* Copy the length of data being passed */
@@ -1183,9 +1181,10 @@ static int diagchar_read(struct file *file, char __user *buf, size_t count,
 				ret += driver->buf_tbl[i].length;
 drop:
 #ifdef DIAG_DEBUG
-				pr_debug("diag: DEQUEUE buf address and length is %p, %d\n",
-					 driver->buf_tbl[i].buf,
-					 driver->buf_tbl[i].length);
+				pr_debug("diag: DEQUEUE buf address and"
+				       " length is %x,%d\n", (unsigned int)
+				       (driver->buf_tbl[i].buf), driver->
+				       buf_tbl[i].length);
 #endif
 				diagmem_free(driver, (unsigned char *)
 				(driver->buf_tbl[i].buf), POOL_TYPE_HDLC);

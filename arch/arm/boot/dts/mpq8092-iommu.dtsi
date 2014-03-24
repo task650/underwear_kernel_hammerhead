@@ -38,7 +38,3 @@
 	status = "ok";
 	vdd-supply = <&gdsc_vfe>;
 };
-
-&vcap_iommu {
-	status = "ok";
-};

@@ -238,7 +238,7 @@ static int ngd_xfer_msg(struct slim_controller *ctrl, struct slim_msg_txn *txn)
 	}
 	if ((txn->mc == (SLIM_MSG_CLK_PAUSE_SEQ_FLG |
 			SLIM_MSG_MC_RECONFIGURE_NOW)) &&
-			dev->state <= MSM_CTRL_IDLE) {
+			dev->state <= MSM_CTRL_SLEEPING) {
 		msm_slim_disconnect_endp(dev, &dev->rx_msgq,
 					&dev->use_rx_msgqs);
 		msm_slim_disconnect_endp(dev, &dev->tx_msgq,
@@ -280,20 +280,7 @@ static int ngd_xfer_msg(struct slim_controller *ctrl, struct slim_msg_txn *txn)
 			if (!timeout)
 				return -ETIMEDOUT;
 		}
-		ret = msm_slim_get_ctrl(dev);
-		/*
-		 * Runtime-pm's callbacks are not called until runtime-pm's
-		 * error status is cleared
-		 * Setting runtime status to suspended clears the error
-		 * It also makes HW status cosistent with what SW has it here
-		 */
-		if (ret == -ENETRESET && dev->state == MSM_CTRL_DOWN) {
-			pm_runtime_set_suspended(dev->dev);
-			msm_slim_put_ctrl(dev);
-			return -EREMOTEIO;
-		} else if (ret >= 0) {
-			dev->state = MSM_CTRL_AWAKE;
-		}
+		msm_slim_get_ctrl(dev);
 	}
 	mutex_lock(&dev->tx_lock);
 
@@ -480,8 +467,7 @@ static int ngd_xferandwait_ack(struct slim_controller *ctrl,
 			ret = txn->ec;
 	}
 	if (ret) {
-		if (ret != -EREMOTEIO || txn->mc != SLIM_USR_MC_CHAN_CTRL)
-			pr_err("master msg:0x%x,tid:%d ret:%d", txn->mc,
+		pr_err("master msg:0x%x,tid:%d ret:%d", txn->mc,
 				txn->tid, ret);
 		mutex_lock(&ctrl->m_ctrl);
 		ctrl->txnt[txn->tid] = NULL;
@@ -607,10 +593,7 @@ static int ngd_allocbw(struct slim_device *sb, int *subfrmc, int *clkgear)
 		txn.mc = SLIM_USR_MC_CHAN_CTRL;
 		txn.rl = txn.len + 4;
 		ret = ngd_xferandwait_ack(ctrl, &txn);
-		/* HW restarting, channel removal should succeed */
-		if (ret == -EREMOTEIO)
-			return 0;
-		else if (ret)
+		if (ret)
 			return ret;
 
 		txn.mc = SLIM_USR_MC_RECONFIG_NOW;
@@ -967,12 +950,10 @@ static void ngd_laddr_lookup(struct work_struct *work)
 		container_of(work, struct msm_slim_ctrl, slave_notify);
 	struct slim_controller *ctrl = &dev->ctrl;
 	struct slim_device *sbdev;
-	struct list_head *pos, *next;
 	int i;
 	mutex_lock(&ctrl->m_ctrl);
-	list_for_each_safe(pos, next, &ctrl->devs) {
+	list_for_each_entry(sbdev, &ctrl->devs, dev_list) {
 		int ret = 0;
-		sbdev = list_entry(pos, struct slim_device, dev_list);
 		mutex_unlock(&ctrl->m_ctrl);
 		for (i = 0; i < LADDR_RETRY; i++) {
 			ret = slim_get_logical_addr(sbdev, sbdev->e_addr,
@@ -1062,7 +1043,7 @@ static int __devinit ngd_slim_probe(struct platform_device *pdev)
 	}
 
 	dev = kzalloc(sizeof(struct msm_slim_ctrl), GFP_KERNEL);
-	if (IS_ERR_OR_NULL(dev)) {
+	if (IS_ERR(dev)) {
 		dev_err(&pdev->dev, "no memory for MSM slimbus controller\n");
 		return PTR_ERR(dev);
 	}
@@ -1160,7 +1141,6 @@ static int __devinit ngd_slim_probe(struct platform_device *pdev)
 	dev->qmi.nb.notifier_call = ngd_qmi_available;
 	pm_runtime_get_noresume(dev->dev);
 	ret = qmi_svc_event_notifier_register(SLIMBUS_QMI_SVC_ID,
-				SLIMBUS_QMI_SVC_V1,
 				SLIMBUS_QMI_INS_ID, &dev->qmi.nb);
 	if (ret) {
 		pr_err("Slimbus QMI service registration failed:%d", ret);
@@ -1188,7 +1168,6 @@ static int __devinit ngd_slim_probe(struct platform_device *pdev)
 
 err_thread_create_failed:
 	qmi_svc_event_notifier_unregister(SLIMBUS_QMI_SVC_ID,
-				SLIMBUS_QMI_SVC_V1,
 				SLIMBUS_QMI_INS_ID, &dev->qmi.nb);
 qmi_register_failed:
 	free_irq(dev->irq, dev);
@@ -1208,7 +1187,6 @@ static int __devexit ngd_slim_remove(struct platform_device *pdev)
 	struct msm_slim_ctrl *dev = platform_get_drvdata(pdev);
 	ngd_slim_enable(dev, false);
 	qmi_svc_event_notifier_unregister(SLIMBUS_QMI_SVC_ID,
-				SLIMBUS_QMI_SVC_V1,
 				SLIMBUS_QMI_INS_ID, &dev->qmi.nb);
 	pm_runtime_disable(&pdev->dev);
 	free_irq(dev->irq, dev);
@@ -1223,10 +1201,6 @@ static int __devexit ngd_slim_remove(struct platform_device *pdev)
 #ifdef CONFIG_PM_RUNTIME
 static int ngd_slim_runtime_idle(struct device *device)
 {
-	struct platform_device *pdev = to_platform_device(device);
-	struct msm_slim_ctrl *dev = platform_get_drvdata(pdev);
-	if (dev->state == MSM_CTRL_AWAKE)
-		dev->state = MSM_CTRL_IDLE;
 	dev_dbg(device, "pm_runtime: idle...\n");
 	pm_request_autosuspend(device);
 	return -EAGAIN;
@@ -1246,11 +1220,8 @@ static int ngd_slim_runtime_resume(struct device *device)
 	if (dev->state >= MSM_CTRL_ASLEEP)
 		ret = slim_ctrl_clk_pause(&dev->ctrl, true, 0);
 	if (ret) {
-		/* Did SSR cause this clock pause failure */
-		if (dev->state != MSM_CTRL_DOWN)
-			dev->state = MSM_CTRL_ASLEEP;
-		else
-			dev_err(device, "HW wakeup attempt during SSR");
+		dev_err(device, "clk pause not exited:%d", ret);
+		dev->state = MSM_CTRL_ASLEEP;
 	} else {
 		dev->state = MSM_CTRL_AWAKE;
 	}
@@ -1263,6 +1234,7 @@ static int ngd_slim_runtime_suspend(struct device *device)
 	struct platform_device *pdev = to_platform_device(device);
 	struct msm_slim_ctrl *dev = platform_get_drvdata(pdev);
 	int ret = 0;
+	dev->state = MSM_CTRL_SLEEPING;
 	ret = slim_ctrl_clk_pause(&dev->ctrl, false, SLIM_CLK_UNSPECIFIED);
 	if (ret) {
 		if (ret != -EBUSY)
@@ -1277,11 +1249,7 @@ static int ngd_slim_runtime_suspend(struct device *device)
 static int ngd_slim_suspend(struct device *dev)
 {
 	int ret = -EBUSY;
-	struct platform_device *pdev = to_platform_device(dev);
-	struct msm_slim_ctrl *cdev = platform_get_drvdata(pdev);
-	if (!pm_runtime_enabled(dev) ||
-		(!pm_runtime_suspended(dev) &&
-			cdev->state == MSM_CTRL_IDLE)) {
+	if (!pm_runtime_enabled(dev) || !pm_runtime_suspended(dev)) {
 		dev_dbg(dev, "system suspend");
 		ret = ngd_slim_runtime_suspend(dev);
 		/*

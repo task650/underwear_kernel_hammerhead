@@ -1297,6 +1297,15 @@ static irqreturn_t qpnp_adc_tm_low_thr_isr(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+static irqreturn_t qpnp_adc_tm_isr(int irq, void *dev_id)
+{
+	struct qpnp_adc_tm_drv *adc_tm = dev_id;
+
+	complete(&adc_tm->adc->adc_rslt_completion);
+
+	return IRQ_HANDLED;
+}
+
 static int qpnp_adc_read_temp(struct thermal_zone_device *thermal,
 			     unsigned long *temp)
 {
@@ -1334,7 +1343,7 @@ int32_t qpnp_adc_tm_channel_measure(struct qpnp_adc_tm_btm_param *param)
 		return -ENODEV;
 
 	if (param->threshold_notification == NULL) {
-		pr_debug("No notification for high/low temp??\n");
+		pr_err("No notification for high/low temp??\n");
 		return -EINVAL;
 	}
 
@@ -1581,6 +1590,17 @@ static int __devinit qpnp_adc_tm_probe(struct spmi_device *spmi)
 		goto fail;
 	}
 
+	rc = devm_request_irq(&spmi->dev, adc_tm->adc->adc_irq_eoc,
+				qpnp_adc_tm_isr, IRQF_TRIGGER_RISING,
+				"qpnp_adc_tm_interrupt", adc_tm);
+	if (rc) {
+		dev_err(&spmi->dev,
+			"failed to request adc irq with error %d\n", rc);
+		goto fail;
+	} else {
+		enable_irq_wake(adc_tm->adc->adc_irq_eoc);
+	}
+
 	rc = devm_request_irq(&spmi->dev, adc_tm->adc->adc_high_thr_irq,
 				qpnp_adc_tm_high_thr_isr,
 		IRQF_TRIGGER_RISING, "qpnp_adc_tm_high_interrupt", adc_tm);
@@ -1625,7 +1645,7 @@ static int __devinit qpnp_adc_tm_probe(struct spmi_device *spmi)
 			pr_debug("thermal node%x\n", btm_channel_num);
 			adc_tm->sensor[sen_idx].mode = THERMAL_DEVICE_DISABLED;
 			adc_tm->sensor[sen_idx].thermal_node = true;
-			snprintf(name, sizeof(name), "%s",
+			snprintf(name, sizeof(name),
 				adc_tm->adc->adc_channels[sen_idx].name);
 			adc_tm->sensor[sen_idx].meas_interval =
 				QPNP_ADC_TM_MEAS_INTERVAL;

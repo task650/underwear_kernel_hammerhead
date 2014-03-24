@@ -17,7 +17,8 @@
 		      <0xfc37c000 0x3000>;
 		reg-names = "tmc-base", "bam-base";
 
-		qcom,memory-size = <0x20000>;
+		qcom,memory-reservation-type = "EBI1";
+		qcom,memory-reservation-size = <0x20000>; /* 128K EBI1 buffer */
 
 		coresight-id = <0>;
 		coresight-name = "coresight-tmc-etr";

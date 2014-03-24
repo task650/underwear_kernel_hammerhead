@@ -127,12 +127,12 @@ static void __disable_clocks(struct msm_iommu_drvdata *drvdata)
 	clk_disable_unprepare(drvdata->pclk);
 }
 
-static void _iommu_lock_acquire(unsigned int need_extra_lock)
+static void _iommu_lock_acquire(void)
 {
 	mutex_lock(&msm_iommu_lock);
 }
 
-static void _iommu_lock_release(unsigned int need_extra_lock)
+static void _iommu_lock_release(void)
 {
 	mutex_unlock(&msm_iommu_lock);
 }
@@ -666,7 +666,6 @@ static int msm_iommu_map(struct iommu_domain *domain, unsigned long va,
 	if (ret)
 		goto fail;
 
-	ret = __flush_iotlb_va(domain, va);
 fail:
 	mutex_unlock(&msm_iommu_lock);
 	return ret;
@@ -716,7 +715,6 @@ static int msm_iommu_map_range(struct iommu_domain *domain, unsigned int va,
 	if (ret)
 		goto fail;
 
-	__flush_iotlb(domain);
 fail:
 	mutex_unlock(&msm_iommu_lock);
 	return ret;

@@ -89,9 +89,6 @@
 #include <trace/events/sched.h>
 
 ATOMIC_NOTIFIER_HEAD(migration_notifier_head);
-#ifdef CONFIG_ANDROID_BG_SCAN_MEM
-RAW_NOTIFIER_HEAD(bgtsk_migration_notifier_head);
-#endif
 
 void start_bandwidth_timer(struct hrtimer *period_timer, ktime_t period)
 {
@@ -5175,7 +5172,7 @@ void show_state_filter(unsigned long state_filter)
 
 	touch_all_softlockup_watchdogs();
 
-#ifdef CONFIG_SYSRQ_SCHED_DEBUG
+#ifdef CONFIG_SCHED_DEBUG
 	sysrq_sched_debug_show();
 #endif
 	rcu_read_unlock();
@@ -8036,14 +8033,8 @@ static void cpu_cgroup_attach(struct cgroup *cgrp,
 {
 	struct task_struct *task;
 
-	cgroup_taskset_for_each(task, cgrp, tset) {
+	cgroup_taskset_for_each(task, cgrp, tset)
 		sched_move_task(task);
-#ifdef CONFIG_ANDROID_BG_SCAN_MEM
-		if (task_notify_on_migrate(task) && thread_group_leader(task))
-			raw_notifier_call_chain(&bgtsk_migration_notifier_head,
-						0, NULL);
-#endif
-	}
 }
 
 static void

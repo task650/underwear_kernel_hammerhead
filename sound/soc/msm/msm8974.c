@@ -142,11 +142,6 @@ static struct wcd9xxx_mbhc_config mbhc_cfg = {
 	.micbias_enable_flags = 1 << MBHC_MICBIAS_ENABLE_THRESHOLD_HEADSET,
 	.insert_detect = true,
 	.swap_gnd_mic = NULL,
-	.cs_enable_flags = (1 << MBHC_CS_ENABLE_POLLING |
-			    1 << MBHC_CS_ENABLE_INSERTION |
-			    1 << MBHC_CS_ENABLE_REMOVAL),
-	.do_recalibration = true,
-	.use_vddio_meas = true,
 };
 
 struct msm_auxpcm_gpio {
@@ -725,8 +720,7 @@ static const struct snd_soc_dapm_widget msm8974_dapm_widgets[] = {
 static const char *const spk_function[] = {"Off", "On"};
 static const char *const slim0_rx_ch_text[] = {"One", "Two"};
 static const char *const slim0_tx_ch_text[] = {"One", "Two", "Three", "Four",
-						"Five", "Six", "Seven",
-						"Eight"};
+						"Five"};
 static char const *hdmi_rx_ch_text[] = {"Two", "Three", "Four", "Five",
 					"Six", "Seven", "Eight"};
 static char const *rx_bit_format_text[] = {"S16_LE", "S24_LE"};
@@ -1275,8 +1269,6 @@ static int msm_slim_0_tx_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 			SNDRV_PCM_HW_PARAM_CHANNELS);
 
 	pr_debug("%s()\n", __func__);
-	param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT,
-				   slim0_rx_bit_format);
 	rate->min = rate->max = 48000;
 	channels->min = channels->max = msm_slim_0_tx_ch;
 
@@ -1341,7 +1333,7 @@ static int msm_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 static const struct soc_enum msm_snd_enum[] = {
 	SOC_ENUM_SINGLE_EXT(2, spk_function),
 	SOC_ENUM_SINGLE_EXT(2, slim0_rx_ch_text),
-	SOC_ENUM_SINGLE_EXT(8, slim0_tx_ch_text),
+	SOC_ENUM_SINGLE_EXT(5, slim0_tx_ch_text),
 	SOC_ENUM_SINGLE_EXT(7, hdmi_rx_ch_text),
 	SOC_ENUM_SINGLE_EXT(2, rx_bit_format_text),
 	SOC_ENUM_SINGLE_EXT(3, slim0_rx_sample_rate_text),
@@ -1585,7 +1577,6 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 		pr_err("%s: Failed to register adsp state notifier\n",
 		       __func__);
 		err = -EFAULT;
-		taiko_hs_detect_exit(codec);
 		goto out;
 	}
 
@@ -2073,7 +2064,7 @@ static struct snd_soc_dai_link msm8974_common_dai_links[] = {
 		.name = "MSM8974 Compr2",
 		.stream_name = "COMPR2",
 		.cpu_dai_name	= "MultiMedia6",
-		.platform_name  = "msm-compress-dsp",
+		.platform_name  = "msm-compr-dsp",
 		.dynamic = 1,
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
 			 SND_SOC_DPCM_TRIGGER_POST},
@@ -2088,7 +2079,7 @@ static struct snd_soc_dai_link msm8974_common_dai_links[] = {
 		.name = "MSM8974 Compr3",
 		.stream_name = "COMPR3",
 		.cpu_dai_name	= "MultiMedia7",
-		.platform_name  = "msm-compress-dsp",
+		.platform_name  = "msm-compr-dsp",
 		.dynamic = 1,
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
 			 SND_SOC_DPCM_TRIGGER_POST},
@@ -2103,7 +2094,7 @@ static struct snd_soc_dai_link msm8974_common_dai_links[] = {
 		.name = "MSM8974 Compr4",
 		.stream_name = "COMPR4",
 		.cpu_dai_name	= "MultiMedia8",
-		.platform_name  = "msm-compress-dsp",
+		.platform_name  = "msm-compr-dsp",
 		.dynamic = 1,
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
 			 SND_SOC_DPCM_TRIGGER_POST},

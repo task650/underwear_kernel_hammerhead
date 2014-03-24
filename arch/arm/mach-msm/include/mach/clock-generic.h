@@ -46,8 +46,6 @@ struct mux_clk {
 	struct clk	*safe_parent;
 	int		safe_sel;
 	struct clk_mux_ops *ops;
-	/* Recursively search for the requested parent. */
-	bool		rec_set_par;
 
 	/* Fields not used by helper function. */
 	void *const __iomem *base;
@@ -106,12 +104,6 @@ static inline struct div_clk *to_div_clk(struct clk *c)
 extern struct clk_ops clk_ops_div;
 extern struct clk_ops clk_ops_slave_div;
 
-struct ext_clk {
-	struct clk c;
-};
-
-extern struct clk_ops clk_ops_ext;
-
 #define DEFINE_FIXED_DIV_CLK(clk_name, _div, _parent) \
 static struct div_clk clk_name = {	\
 	.div = _div,				\
@@ -130,16 +122,6 @@ static struct div_clk clk_name = {	\
 		.parent = _parent,		\
 		.dbg_name = #clk_name,		\
 		.ops = &clk_ops_slave_div,		\
-		CLK_INIT(clk_name.c),		\
-	}					\
-}
-
-#define DEFINE_EXT_CLK(clk_name, _parent) \
-static struct ext_clk clk_name = {		\
-	.c = {					\
-		.parent = _parent,		\
-		.dbg_name = #clk_name,		\
-		.ops = &clk_ops_ext,		\
 		CLK_INIT(clk_name.c),		\
 	}					\
 }

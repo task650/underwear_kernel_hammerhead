@@ -20,6 +20,7 @@
 #include <linux/mmc/host.h>
 #include <linux/delay.h>
 #include <linux/test-iosched.h>
+#include <linux/jiffies.h>
 #include "queue.h"
 #include <linux/mmc/mmc.h>
 
@@ -2285,9 +2286,6 @@ static ssize_t send_write_packing_test_read(struct file *file,
 			       size_t count,
 			       loff_t *offset)
 {
-	if (!access_ok(VERIFY_WRITE, buffer, count))
-		return count;
-
 	memset((void *)buffer, 0, count);
 
 	snprintf(buffer, count,
@@ -2386,9 +2384,6 @@ static ssize_t err_check_test_read(struct file *file,
 			       size_t count,
 			       loff_t *offset)
 {
-	if (!access_ok(VERIFY_WRITE, buffer, count))
-		return count;
-
 	memset((void *)buffer, 0, count);
 
 	snprintf(buffer, count,
@@ -2497,9 +2492,6 @@ static ssize_t send_invalid_packed_test_read(struct file *file,
 			       size_t count,
 			       loff_t *offset)
 {
-	if (!access_ok(VERIFY_WRITE, buffer, count))
-		return count;
-
 	memset((void *)buffer, 0, count);
 
 	snprintf(buffer, count,
@@ -2614,9 +2606,6 @@ static ssize_t write_packing_control_test_read(struct file *file,
 			       size_t count,
 			       loff_t *offset)
 {
-	if (!access_ok(VERIFY_WRITE, buffer, count))
-		return count;
-
 	memset((void *)buffer, 0, count);
 
 	snprintf(buffer, count,
@@ -2742,9 +2731,6 @@ static ssize_t bkops_test_read(struct file *file,
 			       size_t count,
 			       loff_t *offset)
 {
-	if (!access_ok(VERIFY_WRITE, buffer, count))
-		return count;
-
 	memset((void *)buffer, 0, count);
 
 	snprintf(buffer, count,
@@ -2801,7 +2787,7 @@ static ssize_t long_sequential_read_test_write(struct file *file,
 		if (ret)
 			break;
 
-		mtime = ktime_to_ms(mbtd->test_info.test_duration);
+		mtime = jiffies_to_msecs(mbtd->test_info.test_duration);
 
 		test_pr_info("%s: time is %lu msec, size is %u.%u MiB",
 			__func__, mtime,
@@ -2833,9 +2819,6 @@ static ssize_t long_sequential_read_test_read(struct file *file,
 			       size_t count,
 			       loff_t *offset)
 {
-	if (!access_ok(VERIFY_WRITE, buffer, count))
-		return count;
-
 	memset((void *)buffer, 0, count);
 
 	snprintf(buffer, count,
@@ -2885,7 +2868,6 @@ static int run_long_seq_write(struct test_data *td)
 {
 	int ret = 0;
 	int i;
-	int num_requests = TEST_MAX_REQUESTS / 2;
 
 	td->test_count = 0;
 	mbtd->completed_req_count = 0;
@@ -2895,15 +2877,15 @@ static int run_long_seq_write(struct test_data *td)
 		     td->wr_rd_next_req_id);
 
 	do {
-		for (i = 0; i < num_requests; i++) {
+		for (i = 0; i < TEST_MAX_REQUESTS; i++) {
 			/*
 			 * since our requests come from a pool containing 128
 			 * requests, we don't want to exhaust this quantity,
-			 * therefore we add up to num_requests (which
+			 * therefore we add up to TEST_MAX_REQUESTS (which
 			 * includes a safety margin) and then call the mmc layer
 			 * to fetch them
 			 */
-			if (td->test_count > num_requests)
+			if (td->test_count > TEST_MAX_REQUESTS)
 				break;
 
 			ret = test_iosched_add_wr_rd_test_req(0, WRITE,
@@ -2964,7 +2946,7 @@ static ssize_t long_sequential_write_test_write(struct file *file,
 		if (ret)
 			break;
 
-		mtime = ktime_to_ms(mbtd->test_info.test_duration);
+		mtime = jiffies_to_msecs(mbtd->test_info.test_duration);
 		byte_count = mbtd->test_info.test_byte_count;
 
 		test_pr_info("%s: time is %lu msec, size is %lu.%lu MiB",
@@ -2996,9 +2978,6 @@ static ssize_t long_sequential_write_test_read(struct file *file,
 			       size_t count,
 			       loff_t *offset)
 {
-	if (!access_ok(VERIFY_WRITE, buffer, count))
-		return count;
-
 	memset((void *)buffer, 0, count);
 
 	snprintf(buffer, count,
@@ -3072,9 +3051,6 @@ static ssize_t new_req_notification_test_read(struct file *file,
 			       size_t count,
 			       loff_t *offset)
 {
-	if (!access_ok(VERIFY_WRITE, buffer, count))
-		return count;
-
 	memset((void *)buffer, 0, count);
 
 	snprintf(buffer, count,

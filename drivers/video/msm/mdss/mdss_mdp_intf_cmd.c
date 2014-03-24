@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -45,13 +45,13 @@ struct mdss_mdp_cmd_ctx {
 	struct work_struct clk_work;
 	struct work_struct pp_done_work;
 	atomic_t pp_done_cnt;
+
 	/* te config */
 	u8 tear_check;
 	u16 height;	/* panel height */
 	u16 vporch;	/* vertical porches */
 	u16 start_threshold;
 	u32 vclk_line;	/* vsync clock per line */
-	struct mdss_panel_recovery recovery;
 };
 
 struct mdss_mdp_cmd_ctx mdss_mdp_cmd_ctx_list[MAX_SESSIONS];
@@ -198,14 +198,12 @@ static int mdss_mdp_cmd_tearcheck_setup(struct mdss_mdp_ctl *ctl, int enable)
 static inline void mdss_mdp_cmd_clk_on(struct mdss_mdp_cmd_ctx *ctx)
 {
 	unsigned long flags;
-	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 	mutex_lock(&ctx->clk_mtx);
 	if (!ctx->clk_enabled) {
 		ctx->clk_enabled = 1;
 		mdss_mdp_ctl_intf_event
 			(ctx->ctl, MDSS_EVENT_PANEL_CLK_CTRL, (void *)1);
 		mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
-		mdss_mdp_hist_intr_setup(&mdata->hist_intr, MDSS_IRQ_RESUME);
 	}
 	spin_lock_irqsave(&ctx->clk_lock, flags);
 	if (!ctx->rdptr_enabled)
@@ -218,7 +216,6 @@ static inline void mdss_mdp_cmd_clk_on(struct mdss_mdp_cmd_ctx *ctx)
 static inline void mdss_mdp_cmd_clk_off(struct mdss_mdp_cmd_ctx *ctx)
 {
 	unsigned long flags;
-	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 	int set_clk_off = 0;
 
 	mutex_lock(&ctx->clk_mtx);
@@ -229,7 +226,6 @@ static inline void mdss_mdp_cmd_clk_off(struct mdss_mdp_cmd_ctx *ctx)
 
 	if (ctx->clk_enabled && set_clk_off) {
 		ctx->clk_enabled = 0;
-		mdss_mdp_hist_intr_setup(&mdata->hist_intr, MDSS_IRQ_SUSPEND);
 		mdss_mdp_ctl_intf_event
 			(ctx->ctl, MDSS_EVENT_PANEL_CLK_CTRL, (void *)0);
 		mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
@@ -271,31 +267,6 @@ static void mdss_mdp_cmd_readptr_done(void *arg)
 	}
 
 	spin_unlock(&ctx->clk_lock);
-}
-
-static void mdss_mdp_cmd_underflow_recovery(void *data)
-{
-	struct mdss_mdp_cmd_ctx *ctx = data;
-	unsigned long flags;
-
-	if (!data) {
-		pr_err("%s: invalid ctx\n", __func__);
-		return;
-	}
-
-	if (!ctx->ctl)
-		return;
-	spin_lock_irqsave(&ctx->clk_lock, flags);
-	if (ctx->koff_cnt) {
-		mdss_mdp_ctl_reset(ctx->ctl);
-		pr_debug("%s: intf_num=%d\n", __func__,
-					ctx->ctl->intf_num);
-		ctx->koff_cnt--;
-		mdss_mdp_irq_disable_nosync(MDSS_MDP_IRQ_PING_PONG_COMP,
-						ctx->pp_num);
-		complete_all(&ctx->pp_comp);
-	}
-	spin_unlock_irqrestore(&ctx->clk_lock, flags);
 }
 
 static void mdss_mdp_cmd_pingpong_done(void *arg)
@@ -420,7 +391,7 @@ static int mdss_mdp_cmd_remove_vsync_handler(struct mdss_mdp_ctl *ctl,
 	return 0;
 }
 
-int mdss_mdp_cmd_reconfigure_splash_done(struct mdss_mdp_ctl *ctl, bool handoff)
+int mdss_mdp_cmd_reconfigure_splash_done(struct mdss_mdp_ctl *ctl)
 {
 	struct mdss_panel_data *pdata;
 	int ret = 0;
@@ -428,6 +399,9 @@ int mdss_mdp_cmd_reconfigure_splash_done(struct mdss_mdp_ctl *ctl, bool handoff)
 	pdata = ctl->panel_data;
 
 	pdata->panel_info.cont_splash_enabled = 0;
+
+	ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_CONT_SPLASH_FINISH,
+			NULL);
 
 	mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_PANEL_CLK_CTRL, (void *)0);
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
@@ -499,13 +473,12 @@ int mdss_mdp_cmd_kickoff(struct mdss_mdp_ctl *ctl, void *arg)
 		WARN(rc, "intf %d panel on error (%d)\n", ctl->intf_num, rc);
 	}
 
-	mdss_mdp_cmd_clk_on(ctx);
-
 	/*
 	 * tx dcs command if had any
 	 */
-	mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_DSI_CMDLIST_KOFF,
-						(void *)&ctx->recovery);
+	mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_DSI_CMDLIST_KOFF, NULL);
+
+	mdss_mdp_cmd_clk_on(ctx);
 
 	INIT_COMPLETION(ctx->pp_comp);
 	mdss_mdp_irq_enable(MDSS_MDP_IRQ_PING_PONG_COMP, ctx->pp_num);
@@ -625,9 +598,6 @@ int mdss_mdp_cmd_start(struct mdss_mdp_ctl *ctl)
 	INIT_WORK(&ctx->pp_done_work, pingpong_done_work);
 	atomic_set(&ctx->pp_done_cnt, 0);
 	INIT_LIST_HEAD(&ctx->vsync_handlers);
-
-	ctx->recovery.fxn = mdss_mdp_cmd_underflow_recovery;
-	ctx->recovery.data = ctx;
 
 	pr_debug("%s: ctx=%p num=%d mixer=%d\n", __func__,
 				ctx, ctx->pp_num, mixer->num);

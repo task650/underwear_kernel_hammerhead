@@ -31,9 +31,6 @@
  */
 extern int msm_cpufreq_set_freq_limits(
 		uint32_t cpu, uint32_t min, uint32_t max);
-
-extern void msm_cpufreq_set_min_freq_limit(
-		uint32_t cpu, uint32_t min);
 #else
 static inline int msm_cpufreq_set_freq_limits(
 		uint32_t cpu, uint32_t min, uint32_t max)

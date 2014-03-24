@@ -139,12 +139,12 @@ static void msm_send_eq_values(int eq_idx);
  * If new back-end is defined, add new back-end DAI ID at the end of enum
  */
 
-#define SRS_TRUMEDIA_INDEX 2
+
 union srs_trumedia_params_u {
 	struct srs_trumedia_params srs_params;
 	unsigned short int raw_params[1];
 };
-static union srs_trumedia_params_u msm_srs_trumedia_params[SRS_TRUMEDIA_INDEX];
+static union srs_trumedia_params_u msm_srs_trumedia_params[2];
 static int srs_port_id = -1;
 
 static void srs_send_params(int port_id, unsigned int techs,
@@ -401,7 +401,7 @@ void msm_pcm_routing_reg_phy_stream(int fedai_id, bool perf_mode,
 				path_type,
 				msm_bedais[i].sample_rate,
 				msm_bedais[i].channel,
-				topology, perf_mode,
+				topology, false,
 				bits_per_sample);
 
 			payload.copp_ids[payload.num_copps++] =
@@ -1116,7 +1116,7 @@ static int msm_routing_set_srs_trumedia_control_(struct snd_kcontrol *kcontrol,
 			SRS_PARAM_OFFSET_MASK) >> 16);
 	value = (unsigned short)(ucontrol->value.integer.value[0] &
 			SRS_PARAM_VALUE_MASK);
-	if ((offset < max) && (index < SRS_TRUMEDIA_INDEX)) {
+	if (offset < max) {
 		msm_srs_trumedia_params[index].raw_params[offset] = value;
 		pr_debug("SRS %s: index set... (max %d, requested %d, val %d, paramblockidx %d)",
 			__func__, max, offset, value, index);
@@ -2277,9 +2277,6 @@ static const struct snd_kcontrol_new auxpcm_rx_port_mixer_controls[] = {
 	SOC_SINGLE_EXT("SLIM_0_TX", MSM_BACKEND_DAI_AUXPCM_RX,
 	MSM_BACKEND_DAI_SLIMBUS_0_TX, 1, 0, msm_routing_get_port_mixer,
 	msm_routing_put_port_mixer),
-	SOC_SINGLE_EXT("SEC_AUX_PCM_UL_TX", MSM_BACKEND_DAI_SEC_AUXPCM_RX,
-	MSM_BACKEND_DAI_SEC_AUXPCM_TX, 1, 0, msm_routing_get_port_mixer,
-	msm_routing_put_port_mixer),
 };
 
 static const struct snd_kcontrol_new sec_auxpcm_rx_port_mixer_controls[] = {
@@ -2288,9 +2285,6 @@ static const struct snd_kcontrol_new sec_auxpcm_rx_port_mixer_controls[] = {
 	msm_routing_put_port_mixer),
 	SOC_SINGLE_EXT("SLIM_0_TX", MSM_BACKEND_DAI_SEC_AUXPCM_RX,
 	MSM_BACKEND_DAI_SLIMBUS_0_TX, 1, 0, msm_routing_get_port_mixer,
-	msm_routing_put_port_mixer),
-	SOC_SINGLE_EXT("AUX_PCM_UL_TX", MSM_BACKEND_DAI_SEC_AUXPCM_RX,
-	MSM_BACKEND_DAI_SEC_AUXPCM_TX, 1, 0, msm_routing_get_port_mixer,
 	msm_routing_put_port_mixer),
 };
 
@@ -3435,10 +3429,8 @@ static const struct snd_soc_dapm_route intercon[] = {
 
 	{"AUXPCM_RX Port Mixer", "AUX_PCM_UL_TX", "AUX_PCM_TX"},
 	{"AUXPCM_RX Port Mixer", "SLIM_0_TX", "SLIMBUS_0_TX"},
-	{"AUXPCM_RX Port Mixer", "SEC_AUX_PCM_UL_TX", "SEC_AUX_PCM_TX"},
 	{"AUX_PCM_RX", NULL, "AUXPCM_RX Port Mixer"},
 
-	{"SEC_AUXPCM_RX Port Mixer", "AUX_PCM_UL_TX", "AUX_PCM_TX"},
 	{"SEC_AUXPCM_RX Port Mixer", "SEC_AUX_PCM_UL_TX", "SEC_AUX_PCM_TX"},
 	{"SEC_AUXPCM_RX Port Mixer", "SLIM_0_TX", "SLIMBUS_0_TX"},
 	{"SEC_AUX_PCM_RX", NULL, "SEC_AUXPCM_RX Port Mixer"},

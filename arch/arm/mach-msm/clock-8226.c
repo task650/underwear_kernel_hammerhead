@@ -322,7 +322,6 @@ static struct branch_clk oxilicx_axi_clk;
 #define CAMSS_VFE_VFE_AHB_CBCR                             (0x36B8)
 #define CAMSS_VFE_VFE_AXI_CBCR                             (0x36BC)
 #define CAMSS_CSI_VFE0_CBCR                                (0x3704)
-#define CAMSS_MICRO_BCR                                    (0x3490)
 #define OXILI_GFX3D_CBCR                                   (0x4028)
 #define OXILICX_AXI_CBCR                                   (0x4038)
 #define OXILICX_AHB_CBCR                                   (0x403C)
@@ -2361,7 +2360,6 @@ static struct branch_clk camss_mclk1_clk = {
 static struct branch_clk camss_micro_ahb_clk = {
 	.cbcr_reg = CAMSS_MICRO_AHB_CBCR,
 	.has_sibling = 1,
-	.bcr_reg = CAMSS_MICRO_BCR,
 	.base = &virt_bases[MMSS_BASE],
 	.c = {
 		.dbg_name = "camss_micro_ahb_clk",
@@ -2881,7 +2879,6 @@ static DEFINE_CLK_BRANCH_VOTER(cxo_pil_lpass_clk, &xo.c);
 static DEFINE_CLK_BRANCH_VOTER(cxo_pil_mss_clk, &xo.c);
 static DEFINE_CLK_BRANCH_VOTER(cxo_wlan_clk, &xo.c);
 static DEFINE_CLK_BRANCH_VOTER(cxo_pil_pronto_clk, &xo.c);
-static DEFINE_CLK_BRANCH_VOTER(cxo_lpm_clk, &xo.c);
 
 
 #ifdef CONFIG_DEBUG_FS
@@ -3092,9 +3089,6 @@ static struct clk_lookup msm_clocks_8226[] = {
 	CLK_LOOKUP("apc2_m_clk", apc2_m_clk, ""),
 	CLK_LOOKUP("apc3_m_clk", apc3_m_clk, ""),
 	CLK_LOOKUP("l2_m_clk", l2_m_clk, ""),
-
-	/* LPM Resources */
-	CLK_LOOKUP("xo",          cxo_lpm_clk.c, "fc4281d0.qcom,mpm"),
 
 	/* PIL-LPASS */
 	CLK_LOOKUP("xo",          cxo_pil_lpass_clk.c, "fe200000.qcom,lpass"),
