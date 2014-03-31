@@ -2,7 +2,7 @@
  * drivers/gpu/ion/ion_system_heap.c
  *
  * Copyright (C) 2011 Google, Inc.
- * Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -80,18 +80,11 @@ static struct page *alloc_buffer_page(struct ion_system_heap *heap,
 		if (order > 4)
 			gfp_flags = high_order_gfp_flags;
 		trace_alloc_pages_sys_start(gfp_flags, order);
-		page = alloc_pages(gfp_flags & ~__GFP_ZERO, order);
+		page = alloc_pages(gfp_flags, order);
 		trace_alloc_pages_sys_end(gfp_flags, order);
 		if (!page) {
 			trace_alloc_pages_sys_fail(gfp_flags, order);
 			return 0;
-		}
-		if (gfp_flags & __GFP_ZERO) {
-			if (ion_heap_high_order_page_zero(
-					page, order, false)) {
-				__free_pages(page, order);
-				return NULL;
-			}
 		}
 		sg_init_table(&sg, 1);
 		sg_set_page(&sg, page, PAGE_SIZE << order, 0);
@@ -114,7 +107,7 @@ static void free_buffer_page(struct ion_system_heap *heap,
 	bool split_pages = ion_buffer_fault_user_mappings(buffer);
 	int i;
 
-	if (!cached && !(buffer->flags & ION_FLAG_FREED_FROM_SHRINKER)) {
+	if (!cached) {
 		struct ion_page_pool *pool = heap->pools[order_to_index(order)];
 		ion_page_pool_free(pool, page);
 	} else if (split_pages) {
@@ -240,7 +233,7 @@ void ion_system_heap_free(struct ion_buffer *buffer)
 
 	/* uncached pages come from the page pools, zero them before returning
 	   for security purposes (other allocations are zerod at alloc time */
-	if (!cached && !(buffer->flags & ION_FLAG_FREED_FROM_SHRINKER))
+	if (!cached)
 		ion_heap_buffer_zero(buffer);
 
 	for_each_sg(table->sgl, sg, table->nents, i)
@@ -271,51 +264,6 @@ static struct ion_heap_ops system_heap_ops = {
 	.unmap_kernel = ion_heap_unmap_kernel,
 	.map_user = ion_heap_map_user,
 };
-
-static int ion_system_heap_shrink(struct shrinker *shrinker,
-				  struct shrink_control *sc) {
-
-	struct ion_heap *heap = container_of(shrinker, struct ion_heap,
-					     shrinker);
-	struct ion_system_heap *sys_heap = container_of(heap,
-							struct ion_system_heap,
-							heap);
-	int nr_total = 0;
-	int nr_freed = 0;
-	int i;
-
-	if (sc->nr_to_scan == 0)
-		goto end;
-
-	/* shrink the free list first, no point in zeroing the memory if
-	   we're just going to reclaim it. Also, skip any possible
-	   page pooling */
-	nr_freed += ion_heap_freelist_drain_from_shrinker(
-		heap, sc->nr_to_scan * PAGE_SIZE) / PAGE_SIZE;
-
-	if (nr_freed >= sc->nr_to_scan)
-		goto end;
-
-	for (i = 0; i < num_orders; i++) {
-		struct ion_page_pool *pool = sys_heap->pools[i];
-
-		nr_freed += ion_page_pool_shrink(pool, sc->gfp_mask,
-						 sc->nr_to_scan);
-		if (nr_freed >= sc->nr_to_scan)
-			break;
-	}
-
-end:
-	/* total number of items is whatever the page pools are holding
-	   plus whatever's in the freelist */
-	for (i = 0; i < num_orders; i++) {
-		struct ion_page_pool *pool = sys_heap->pools[i];
-		nr_total += ion_page_pool_shrink(pool, sc->gfp_mask, 0);
-	}
-	nr_total += ion_heap_freelist_size(heap) / PAGE_SIZE;
-	return nr_total;
-
-}
 
 static int ion_system_heap_debug_show(struct ion_heap *heap, struct seq_file *s,
 				      void *unused)
@@ -356,18 +304,13 @@ struct ion_heap *ion_system_heap_create(struct ion_platform_heap *unused)
 		struct ion_page_pool *pool;
 		gfp_t gfp_flags = low_order_gfp_flags;
 
-		if (orders[i])
+		if (orders[i] > 4)
 			gfp_flags = high_order_gfp_flags;
-		pool = ion_page_pool_create(gfp_flags, orders[i], false);
+		pool = ion_page_pool_create(gfp_flags, orders[i]);
 		if (!pool)
 			goto err_create_pool;
 		heap->pools[i] = pool;
 	}
-
-	heap->heap.shrinker.shrink = ion_system_heap_shrink;
-	heap->heap.shrinker.seeks = DEFAULT_SEEKS;
-	heap->heap.shrinker.batch = 0;
-	register_shrinker(&heap->heap.shrinker);
 	heap->heap.debug_show = ion_system_heap_debug_show;
 	return &heap->heap;
 err_create_pool:
