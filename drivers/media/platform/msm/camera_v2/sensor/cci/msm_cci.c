@@ -594,7 +594,11 @@ ERROR:
 static int msm_cci_subdev_g_chip_ident(struct v4l2_subdev *sd,
 			struct v4l2_dbg_chip_ident *chip)
 {
-	BUG_ON(!chip);
+	if (!chip) {
+		pr_err("%s:%d: NULL pointer supplied for chip ident\n",
+			 __func__, __LINE__);
+		return -EINVAL;
+	}
 	chip->ident = V4L2_IDENT_CCI;
 	chip->revision = 0;
 	return 0;
@@ -817,7 +821,10 @@ static long msm_cci_subdev_ioctl(struct v4l2_subdev *sd,
 		rc = msm_cci_config(sd, arg);
 		break;
 	case MSM_SD_SHUTDOWN: {
-		return rc;
+		struct msm_camera_cci_ctrl ctrl_cmd;
+		ctrl_cmd.cmd = MSM_CCI_RELEASE;
+		rc = msm_cci_config(sd, &ctrl_cmd);
+		break;
 	}
 	default:
 		rc = -ENOIOCTLCMD;
