@@ -3513,51 +3513,6 @@ void __sched schedule_preempt_disabled(void)
 	preempt_disable();
 }
 
-#ifdef CONFIG_MUTEX_SPIN_ON_OWNER
-
-static inline bool owner_running(struct mutex *lock, struct task_struct *owner)
-{
-	if (lock->owner != owner)
-		return false;
-
-	/*
-	 * Ensure we emit the owner->on_cpu, dereference _after_ checking
-	 * lock->owner still matches owner, if that fails, owner might
-	 * point to free()d memory, if it still matches, the rcu_read_lock()
-	 * ensures the memory stays valid.
-	 */
-	barrier();
-
-	return owner->on_cpu;
-}
-
-/*
- * Look out! "owner" is an entirely speculative pointer
- * access and not reliable.
- */
-int mutex_spin_on_owner(struct mutex *lock, struct task_struct *owner)
-{
-	if (!sched_feat(OWNER_SPIN))
-		return 0;
-
-	rcu_read_lock();
-	while (owner_running(lock, owner)) {
-		if (need_resched())
-			break;
-
-		arch_mutex_cpu_relax();
-	}
-	rcu_read_unlock();
-
-	/*
-	 * We break out the loop above on need_resched() and when the
-	 * owner changed, which is a sign for heavy contention. Return
-	 * success only when lock->owner is NULL.
-	 */
-	return lock->owner == NULL;
-}
-#endif
-
 #ifdef CONFIG_PREEMPT
 /*
  * this is the entry point to schedule() from in-kernel preemption
@@ -4603,11 +4558,13 @@ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
 	struct task_struct *p;
 	int retval;
 
+	get_online_cpus();
 	rcu_read_lock();
 
 	p = find_process_by_pid(pid);
 	if (!p) {
 		rcu_read_unlock();
+		put_online_cpus();
 		return -ESRCH;
 	}
 
@@ -4654,6 +4611,7 @@ out_free_cpus_allowed:
 	free_cpumask_var(cpus_allowed);
 out_put_task:
 	put_task_struct(p);
+	put_online_cpus();
 	return retval;
 }
 
@@ -4696,6 +4654,7 @@ long sched_getaffinity(pid_t pid, struct cpumask *mask)
 	unsigned long flags;
 	int retval;
 
+	get_online_cpus();
 	rcu_read_lock();
 
 	retval = -ESRCH;
@@ -4708,11 +4667,12 @@ long sched_getaffinity(pid_t pid, struct cpumask *mask)
 		goto out_unlock;
 
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
-	cpumask_and(mask, &p->cpus_allowed, cpu_active_mask);
+	cpumask_and(mask, &p->cpus_allowed, cpu_online_mask);
 	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
 
 out_unlock:
 	rcu_read_unlock();
+	put_online_cpus();
 
 	return retval;
 }
@@ -6072,18 +6032,23 @@ static void destroy_sched_domains(struct sched_domain *sd, int cpu)
  * two cpus are in the same cache domain, see cpus_share_cache().
  */
 DEFINE_PER_CPU(struct sched_domain *, sd_llc);
+DEFINE_PER_CPU(int, sd_llc_size);
 DEFINE_PER_CPU(int, sd_llc_id);
 
 static void update_top_cache_domain(int cpu)
 {
 	struct sched_domain *sd;
 	int id = cpu;
+	int size = 1;
 
 	sd = highest_flag_domain(cpu, SD_SHARE_PKG_RESOURCES);
-	if (sd)
+	if (sd) {
 		id = cpumask_first(sched_domain_span(sd));
+		size = cpumask_weight(sched_domain_span(sd));
+	}
 
 	rcu_assign_pointer(per_cpu(sd_llc, cpu), sd);
+	per_cpu(sd_llc_size, cpu) = size;
 	per_cpu(sd_llc_id, cpu) = id;
 }
 
@@ -6384,12 +6349,12 @@ build_sched_groups(struct sched_domain *sd, int cpu)
 
 	for_each_cpu(i, span) {
 		struct sched_group *sg;
-		int group = get_group(i, sdd, &sg);
-		int j;
+		int group, j;
 
 		if (cpumask_test_cpu(i, covered))
 			continue;
 
+		group = get_group(i, sdd, &sg);
 		cpumask_clear(sched_group_cpus(sg));
 		sg->sgp->power = 0;
 
@@ -6969,10 +6934,13 @@ match2:
 #if defined(CONFIG_SCHED_MC) || defined(CONFIG_SCHED_SMT)
 static void reinit_sched_domains(void)
 {
+	get_online_cpus();
+
 	/* Destroy domains first to force the rebuild */
 	partition_sched_domains(0, NULL, NULL);
 
 	rebuild_sched_domains();
+	put_online_cpus();
 }
 
 static ssize_t sched_power_savings_store(const char *buf, size_t count, int smt)
@@ -7123,17 +7091,14 @@ void __init sched_init_smp(void)
 	alloc_cpumask_var(&non_isolated_cpus, GFP_KERNEL);
 	alloc_cpumask_var(&fallback_doms, GFP_KERNEL);
 
-	/*
-	 * There's no userspace yet to cause hotplug operations; hence all the
-	 * cpu masks are stable and all blatant races in the below code cannot
-	 * happen.
-	 */
+	get_online_cpus();
 	mutex_lock(&sched_domains_mutex);
 	init_sched_domains(cpu_active_mask);
 	cpumask_andnot(non_isolated_cpus, cpu_possible_mask, cpu_isolated_map);
 	if (cpumask_empty(non_isolated_cpus))
 		cpumask_set_cpu(smp_processor_id(), non_isolated_cpus);
 	mutex_unlock(&sched_domains_mutex);
+	put_online_cpus();
 
 	hotcpu_notifier(cpuset_cpu_active, CPU_PRI_CPUSET_ACTIVE);
 	hotcpu_notifier(cpuset_cpu_inactive, CPU_PRI_CPUSET_INACTIVE);
